@@ -1,10 +1,11 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Splunk.Extensions.Logging;
 
-internal sealed class SplunkLogger(string category, SplunkLoggerProvider provider) : ILogger
+internal sealed class SplunkLogger(string category, SplunkLoggerProvider provider) : ILogger, IBufferedLogger
 {
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull
         => provider.ScopeProvider?.Push(state);
@@ -16,17 +17,38 @@ internal sealed class SplunkLogger(string category, SplunkLoggerProvider provide
     {
         if (!IsEnabled(logLevel)) return;
         ArgumentNullException.ThrowIfNull(formatter);
-        provider.Enqueue(Serialize(logLevel, eventId, state, exception, formatter(state, exception)));
+        var props = state as IEnumerable<KeyValuePair<string, object?>>;
+        var activity = Activity.Current;
+        provider.Enqueue(Serialize(DateTimeOffset.UtcNow, logLevel, eventId, exception?.GetType().FullName, exception?.Message, exception?.ToString(), formatter(state, exception),
+            activity?.TraceId, activity?.SpanId, props, includeScopes: true));
     }
 
-    private byte[] Serialize<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, string message)
+    public void LogRecords(IEnumerable<BufferedLogRecord> records)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        foreach (var r in records)
+        {
+            if (!IsEnabled(r.LogLevel)) continue;
+            var message = r.FormattedMessage
+                ?? r.Exception
+                ?? string.Empty;
+            ActivityTraceId? traceId = r.ActivityTraceId is { } t && t != default ? t : null;
+            ActivitySpanId? spanId = r.ActivitySpanId is { } s && s != default ? s : null;
+            provider.Enqueue(Serialize(r.Timestamp, r.LogLevel, r.EventId, null, null, r.Exception, message,
+                traceId, spanId, r.Attributes, includeScopes: false));
+        }
+    }
+
+    private byte[] Serialize(DateTimeOffset timestamp, LogLevel level, EventId eventId, string? exceptionType,
+        string? exceptionMessage, string? exceptionStackTrace, string message, ActivityTraceId? traceId, ActivitySpanId? spanId,
+        IEnumerable<KeyValuePair<string, object?>>? props, bool includeScopes)
     {
         var o = provider.Options;
         using var stream = new MemoryStream();
         using (var w = new Utf8JsonWriter(stream))
         {
             w.WriteStartObject();
-            w.WriteNumber("time", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
+            w.WriteNumber("time", timestamp.ToUnixTimeMilliseconds() / 1000.0);
             if (o.Host is not null) w.WriteString("host", o.Host);
             if (o.Source is not null) w.WriteString("source", o.Source);
             if (o.SourceType is not null) w.WriteString("sourcetype", o.SourceType);
@@ -40,19 +62,13 @@ internal sealed class SplunkLogger(string category, SplunkLoggerProvider provide
             w.WriteString("otel.library.name", category);
             if (eventId.Id != 0) w.WriteNumber("logrecord.event.id", eventId.Id);
             if (eventId.Name is not null) w.WriteString("otel.log.name", eventId.Name);
-            if (exception is not null)
-            {
-                w.WriteString("exception.type", exception.GetType().FullName);
-                w.WriteString("exception.message", exception.Message);
-                w.WriteString("exception.stacktrace", exception.ToString());
-            }
-            if (Activity.Current is { } activity)
-            {
-                w.WriteString("trace_id", activity.TraceId.ToHexString());
-                w.WriteString("span_id", activity.SpanId.ToHexString());
-            }
+            if (exceptionType is not null) w.WriteString("exception.type", exceptionType);
+            if (exceptionMessage is not null) w.WriteString("exception.message", exceptionMessage);
+            if (exceptionStackTrace is not null) w.WriteString("exception.stacktrace", exceptionStackTrace);
+            if (traceId is { } tid) w.WriteString("trace_id", tid.ToHexString());
+            if (spanId is { } sid) w.WriteString("span_id", sid.ToHexString());
 
-            if (state is IEnumerable<KeyValuePair<string, object?>> props)
+            if (props is not null)
             {
                 foreach (var (key, value) in props)
                 {
@@ -61,7 +77,7 @@ internal sealed class SplunkLogger(string category, SplunkLoggerProvider provide
                 }
             }
 
-            provider.ScopeProvider?.ForEachScope((scope, writer) =>
+            if (includeScopes) provider.ScopeProvider?.ForEachScope((scope, writer) =>
             {
                 if (scope is IEnumerable<KeyValuePair<string, object?>> kvs)
                     foreach (var (key, value) in kvs)
@@ -113,4 +129,6 @@ internal sealed class SplunkLogger(string category, SplunkLoggerProvider provide
         }
     }
 }
+
+
 

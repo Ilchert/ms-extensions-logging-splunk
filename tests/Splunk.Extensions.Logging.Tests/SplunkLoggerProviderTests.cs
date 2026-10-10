@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace Splunk.Extensions.Logging.Tests;
@@ -71,6 +72,36 @@ public class SplunkLoggerProviderTests
         Assert.Equal(7, f.GetProperty("Id").GetInt32());    }
 
     [Fact]
+    public void Buffered_records_are_sent_with_original_timestamp()
+    {
+        var handler = new CaptureHandler();
+        var provider = Create(handler);
+        var logger = (IBufferedLogger)provider.CreateLogger("Cat");
+        var ts = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero);
+
+        logger.LogRecords([new TestRecord(ts)]);
+        provider.Dispose();
+
+        var req = Assert.Single(handler.Requests);
+        using var doc = JsonDocument.Parse(req.Body);
+        Assert.Equal(ts.ToUnixTimeMilliseconds() / 1000.0, doc.RootElement.GetProperty("time").GetDouble());
+        Assert.Equal("buffered", doc.RootElement.GetProperty("event").GetString());
+        var f = doc.RootElement.GetProperty("fields");
+        Assert.Equal("ERROR", f.GetProperty("otel.log.severity.text").GetString());
+        Assert.Equal(1, f.GetProperty("K").GetInt32());
+    }
+
+    private sealed class TestRecord(DateTimeOffset ts) : BufferedLogRecord
+    {
+        public override DateTimeOffset Timestamp => ts;
+        public override LogLevel LogLevel => LogLevel.Error;
+        public override EventId EventId => default;
+        public override string? Exception => null;
+        public override string? FormattedMessage => "buffered";
+        public override IReadOnlyList<KeyValuePair<string, object?>> Attributes => [new("K", 1)];
+    }
+
+    [Fact]
     public void AddSplunk_registers_provider()
     {
         var services = new ServiceCollection();
@@ -80,6 +111,8 @@ public class SplunkLoggerProviderTests
         Assert.Contains(providers, p => p is SplunkLoggerProvider);
     }
 }
+
+
 
 
 
