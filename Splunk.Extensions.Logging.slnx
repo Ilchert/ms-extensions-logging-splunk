@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/SolutionItems/">
+    <File Path=".editorconfig" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+  </Folder>
+  <Project Path="src/Splunk.Extensions.Logging/Splunk.Extensions.Logging.csproj" />
+  <Project Path="tests/Splunk.Extensions.Logging.Tests/Splunk.Extensions.Logging.Tests.csproj" />
+</Solution>
