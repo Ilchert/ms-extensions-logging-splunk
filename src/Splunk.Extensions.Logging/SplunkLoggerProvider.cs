@@ -1,4 +1,6 @@
-using System.Text;
+using System.Buffers;
+using System.Runtime.InteropServices;
+using System.IO.Pipelines;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -11,7 +13,8 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
 {
     private readonly SplunkLoggerOptions _options;
     private readonly HttpClient _client;
-    private readonly Channel<byte[]> _channel;
+    private readonly ArrayPool<byte> _pool;
+    private readonly Channel<ReadOnlySequence<byte>> _channel;
     private readonly Task _worker;
     private readonly Task _timerTask;
     private readonly PeriodicTimer _timer;
@@ -22,8 +25,9 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     {
         _options = options.Value;
         _client = _options.HttpClient;
+        _pool = _options.ArrayPool;
 
-        _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.QueueCapacity)
+        _channel = Channel.CreateBounded<ReadOnlySequence<byte>>(new BoundedChannelOptions(_options.QueueCapacity)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
@@ -41,7 +45,13 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
 
     internal IExternalScopeProvider? ScopeProvider => _options.IncludeScopes ? _scopeProvider : null;
 
-    internal void Enqueue(byte[] payload) => _channel.Writer.TryWrite(payload);
+    /// <summary>Gets a pooled writer; disposing it queues the written event.</summary>
+    internal PooledBufferWriter GetWriter() => new(this, _pool);
+
+    internal void Enqueue(ReadOnlySequence<byte> entry)
+    {
+        if (!_channel.Writer.TryWrite(entry)) Return(entry);
+    }
 
     /// <summary>Flushes queued events (bounded by ShutdownTimeout) and releases resources.</summary>
     public void Dispose()
@@ -67,9 +77,11 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         _stop.Dispose();
     }
 
-    private void OnItemDropped(byte[] item)
+    private void OnItemDropped(ReadOnlySequence<byte> item)
     {
-        if (item.Length > 0)
+        var isEvent = !item.IsEmpty;
+        Return(item);
+        if (isEvent)
             try { _options.OnDropped?.Invoke(); } catch { }
     }
 
@@ -78,33 +90,49 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         try { _options.OnError?.Invoke(ex); } catch { }
     }
 
-    // Empty arrays are flush markers injected by the timer; real payloads are never empty.
     private async Task RunTimerAsync()
     {
         while (await _timer.WaitForNextTickAsync().ConfigureAwait(false))
-            _channel.Writer.TryWrite([]);
+            _channel.Writer.TryWrite(default);
     }
 
     private async Task RunAsync()
     {
-        var batch = new List<byte[]>(_options.BatchSize);
+        var batch = new List<ReadOnlySequence<byte>>(_options.BatchSize);
         try
         {
             await foreach (var item in _channel.Reader.ReadAllAsync(_stop.Token).ConfigureAwait(false))
             {
-                if (item.Length > 0) batch.Add(item);
-                if (batch.Count == 0 || (item.Length > 0 && batch.Count < _options.BatchSize)) continue;
+                if (!item.IsEmpty) batch.Add(item);
+                if (batch.Count == 0 || (!item.IsEmpty && batch.Count < _options.BatchSize)) continue;
 
                 await SendAsync(batch).ConfigureAwait(false);
-                batch.Clear();
+                ReleaseBatch(batch);
             }
 
             if (batch.Count > 0) await SendAsync(batch).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
+        finally
+        {
+            ReleaseBatch(batch);
+        }
     }
 
-    private async Task SendAsync(List<byte[]> batch)
+    private void Return(ReadOnlySequence<byte> sequence)
+    {
+        foreach (var memory in sequence)
+            if (MemoryMarshal.TryGetArray(memory, out var segment) && segment.Array is { } array)
+                _pool.Return(array);
+    }
+
+    private void ReleaseBatch(List<ReadOnlySequence<byte>> batch)
+    {
+        foreach (var e in batch) Return(e);
+        batch.Clear();
+    }
+
+    private async Task SendAsync(List<ReadOnlySequence<byte>> batch)
     {
         try
         {

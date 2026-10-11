@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace Splunk.Extensions.Logging;
 
 /// <summary>Options for the Splunk HTTP Event Collector (HEC) logger provider.</summary>
@@ -22,6 +24,9 @@ public class SplunkLoggerOptions
 
     /// <summary>Value of the <c>service.name</c> field. Defaults to <c>unknown_service:&lt;process name&gt;</c>, like the OpenTelemetry SDK.</summary>
     public string ServiceName { get; set; } = "unknown_service:" + System.Diagnostics.Process.GetCurrentProcess().ProcessName;
+
+    /// <summary>Pool used for event buffers. Defaults to <see cref="ArrayPool{T}.Shared"/>.</summary>
+    public ArrayPool<byte> ArrayPool { get; set; } = ArrayPool<byte>.Shared;
 
     /// <summary>Include logger scopes in events.</summary>
     public bool IncludeScopes { get; set; } = true;

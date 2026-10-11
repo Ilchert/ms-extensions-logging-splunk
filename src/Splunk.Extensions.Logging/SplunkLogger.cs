@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -51,8 +52,8 @@ internal sealed class SplunkLogger(string category, SplunkLoggerProvider provide
         ArgumentNullException.ThrowIfNull(formatter);
         var props = state as IEnumerable<KeyValuePair<string, object?>>;
         var activity = Activity.Current;
-        provider.Enqueue(Serialize(DateTimeOffset.UtcNow, logLevel, eventId, exception?.GetType().Name, exception?.Message, exception?.ToString(), formatter(state, exception),
-            activity?.TraceId, activity?.SpanId, props, includeScopes: true));
+        Write(DateTimeOffset.UtcNow, logLevel, eventId, exception?.GetType().Name, exception?.Message, exception?.ToString(), formatter(state, exception),
+            activity?.TraceId, activity?.SpanId, props, includeScopes: true);
     }
 
     public void LogRecords(IEnumerable<BufferedLogRecord> records)
@@ -66,66 +67,63 @@ internal sealed class SplunkLogger(string category, SplunkLoggerProvider provide
                 ?? string.Empty;
             ActivityTraceId? traceId = r.ActivityTraceId is { } t && t != default ? t : null;
             ActivitySpanId? spanId = r.ActivitySpanId is { } s && s != default ? s : null;
-            provider.Enqueue(Serialize(r.Timestamp, r.LogLevel, r.EventId, null, null, r.Exception, message,
-                traceId, spanId, r.Attributes, includeScopes: false));
+            Write(r.Timestamp, r.LogLevel, r.EventId, null, null, r.Exception, message,
+                traceId, spanId, r.Attributes, includeScopes: false);
         }
     }
 
-    private byte[] Serialize(DateTimeOffset timestamp, LogLevel level, EventId eventId, string? exceptionType,
+    private void Write(DateTimeOffset timestamp, LogLevel level, EventId eventId, string? exceptionType,
         string? exceptionMessage, string? exceptionStackTrace, string message, ActivityTraceId? traceId, ActivitySpanId? spanId,
         IEnumerable<KeyValuePair<string, object?>>? props, bool includeScopes)
     {
         var o = provider.Options;
-        using var stream = new MemoryStream();
-        using (var w = new Utf8JsonWriter(stream, s_writerOptions))
+        using var buffer = provider.GetWriter();
+        using var w = new Utf8JsonWriter(buffer, s_writerOptions);
+        w.WriteStartObject();
+        w.WriteNumber(s_time, timestamp.ToUnixTimeMilliseconds() / 1000.0);
+        if (o.Host is not null) w.WriteString(s_host, o.Host);
+        if (o.Source is not null) w.WriteString(s_source, o.Source);
+        if (o.SourceType is not null) w.WriteString(s_sourceType, o.SourceType);
+        if (o.Index is not null) w.WriteString(s_index, o.Index);
+
+        w.WriteString(s_event, message);
+
+        w.WriteStartObject(s_fields);
+        w.WriteString(s_severityText, SeverityText(level));
+        w.WriteNumber(s_severityNumber, SeverityNumber(level));
+        w.WriteString(s_serviceName, o.ServiceName);
+        w.WriteString(s_sdkName, "opentelemetry"u8);
+        w.WriteString(s_sdkLanguage, "dotnet"u8);
+        w.WriteString(s_sdkVersion, s_version);
+        w.WriteString(s_scopeName, category);
+        if (eventId.Id != 0) w.WriteNumber(s_eventId, eventId.Id);
+        if (eventId.Name is not null) w.WriteString(s_logName, eventId.Name);
+        if (exceptionType is not null) w.WriteString(s_exceptionType, exceptionType);
+        if (exceptionMessage is not null) w.WriteString(s_exceptionMessage, exceptionMessage);
+        if (exceptionStackTrace is not null) w.WriteString(s_exceptionStackTrace, exceptionStackTrace);
+        if (traceId is { } tid) w.WriteString(s_traceId, tid.ToHexString());
+        if (spanId is { } sid) w.WriteString(s_spanId, sid.ToHexString());
+
+        if (props is not null)
         {
-            w.WriteStartObject();
-            w.WriteNumber(s_time, timestamp.ToUnixTimeMilliseconds() / 1000.0);
-            if (o.Host is not null) w.WriteString(s_host, o.Host);
-            if (o.Source is not null) w.WriteString(s_source, o.Source);
-            if (o.SourceType is not null) w.WriteString(s_sourceType, o.SourceType);
-            if (o.Index is not null) w.WriteString(s_index, o.Index);
-
-            w.WriteString(s_event, message);
-
-            w.WriteStartObject(s_fields);
-            w.WriteString(s_severityText, SeverityText(level));
-            w.WriteNumber(s_severityNumber, SeverityNumber(level));
-            w.WriteString(s_serviceName, o.ServiceName);
-            w.WriteString(s_sdkName, "opentelemetry"u8);
-            w.WriteString(s_sdkLanguage, "dotnet"u8);
-            w.WriteString(s_sdkVersion, s_version);
-            w.WriteString(s_scopeName, category);
-            if (eventId.Id != 0) w.WriteNumber(s_eventId, eventId.Id);
-            if (eventId.Name is not null) w.WriteString(s_logName, eventId.Name);
-            if (exceptionType is not null) w.WriteString(s_exceptionType, exceptionType);
-            if (exceptionMessage is not null) w.WriteString(s_exceptionMessage, exceptionMessage);
-            if (exceptionStackTrace is not null) w.WriteString(s_exceptionStackTrace, exceptionStackTrace);
-            if (traceId is { } tid) w.WriteString(s_traceId, tid.ToHexString());
-            if (spanId is { } sid) w.WriteString(s_spanId, sid.ToHexString());
-
-            if (props is not null)
+            foreach (var (key, value) in props)
             {
-                foreach (var (key, value) in props)
-                {
-                    WriteValue(w, key, value);
-                }
+                WriteValue(w, key, value);
             }
-
-            if (includeScopes) provider.ScopeProvider?.ForEachScope((scope, writer) =>
-            {
-                if (scope is IEnumerable<KeyValuePair<string, object?>> kvs)
-                    foreach (var (key, value) in kvs)
-                    {
-                        if (string.IsNullOrEmpty(key) || key == "{OriginalFormat}") continue;
-                        WriteValue(writer, key, value);
-                    }
-            }, w);
-            w.WriteEndObject();
-
-            w.WriteEndObject();
         }
-        return stream.ToArray();
+
+        if (includeScopes) provider.ScopeProvider?.ForEachScope((scope, writer) =>
+        {
+            if (scope is IEnumerable<KeyValuePair<string, object?>> kvs)
+                foreach (var (key, value) in kvs)
+                {
+                    if (string.IsNullOrEmpty(key) || key == "{OriginalFormat}") continue;
+                    WriteValue(writer, key, value);
+                }
+        }, w);
+        w.WriteEndObject();
+
+        w.WriteEndObject();
     }
 
     private static JsonEncodedText SeverityText(LogLevel l) => l switch
