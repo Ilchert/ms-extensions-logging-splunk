@@ -101,6 +101,71 @@ public class SplunkLoggerProviderTests
         public override IReadOnlyList<KeyValuePair<string, object?>> Attributes => [new("K", 1)];
     }
 
+    private sealed class GatedHandler : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _firstRequestStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<string> Bodies { get; } = [];
+
+        public Task FirstRequestStarted => _firstRequestStarted.Task;
+        public void Release() => _gate.SetResult();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var body = await request.Content!.ReadAsStringAsync(ct);
+            lock (Bodies) Bodies.Add(body);
+            _firstRequestStarted.TrySetResult();
+            await _gate.Task.WaitAsync(ct);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        }
+    }
+
+    [Fact]
+    public async Task Drops_oldest_events_when_queue_is_full()
+    {
+        var handler = new GatedHandler();
+        var provider = new SplunkLoggerProvider(Options.Create(new SplunkLoggerOptions
+        {
+            Endpoint = new Uri("https://splunk:8088"),
+            Token = "tok",
+            BatchSize = 1,
+            QueueCapacity = 2,
+            FlushInterval = TimeSpan.FromHours(1),
+        }), new HttpClient(handler));
+        var logger = provider.CreateLogger("Cat");
+
+        // The worker takes the first event and blocks sending it, leaving the queue empty.
+        logger.LogInformation("m1");
+        await handler.FirstRequestStarted.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        for (var i = 2; i <= 6; i++) logger.LogInformation("m{I}", i);
+
+        handler.Release();
+        provider.Dispose();
+
+        var messages = handler.Bodies.Select(b => JsonDocument.Parse(b).RootElement.GetProperty("event").GetString()!).ToArray();
+        Assert.Equal(["m1", "m5", "m6"], messages);
+    }
+
+    [Fact]
+    public void Reports_error_when_dispose_times_out()
+    {
+        var handler = new GatedHandler();
+        Exception? error = null;
+        var provider = new SplunkLoggerProvider(Options.Create(new SplunkLoggerOptions
+        {
+            Endpoint = new Uri("https://splunk:8088"),
+            Token = "tok",
+            BatchSize = 1,
+            ShutdownTimeout = TimeSpan.FromMilliseconds(100),
+            OnError = e => error = e,
+        }), new HttpClient(handler));
+
+        provider.CreateLogger("Cat").LogInformation("stuck");
+        provider.Dispose();
+
+        Assert.IsType<TimeoutException>(error);
+    }
+
     [Fact]
     public void AddSplunk_registers_provider()
     {

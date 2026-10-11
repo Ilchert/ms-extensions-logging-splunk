@@ -16,6 +16,8 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     private readonly Uri _endpoint;
     private readonly Channel<byte[]> _channel;
     private readonly Task _worker;
+    private readonly Task _timerTask;
+    private readonly PeriodicTimer _timer;
     private readonly CancellationTokenSource _stop = new();
     private IExternalScopeProvider? _scopeProvider;
 
@@ -38,9 +40,11 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
 
         _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.QueueCapacity)
         {
-            FullMode = BoundedChannelFullMode.DropWrite,
+            FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
         });
+        _timer = new PeriodicTimer(_options.FlushInterval);
+        _timerTask = Task.Run(RunTimerAsync);
         _worker = Task.Run(RunAsync);
     }
 
@@ -57,17 +61,31 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     /// <summary>Flushes queued events (bounded by ShutdownTimeout) and releases resources.</summary>
     public void Dispose()
     {
+        _timer.Dispose();
+        _timerTask.Wait();
         _channel.Writer.TryComplete();
         try
         {
             if (!_worker.Wait(_options.ShutdownTimeout))
+            {
                 _stop.Cancel();
+                ReportError(new TimeoutException(
+                    $"Splunk logger did not flush within {_options.ShutdownTimeout}; pending events were dropped."));
+            }
             _worker.Wait(TimeSpan.FromSeconds(1));
         }
-        catch (AggregateException) { }
+        catch (AggregateException ex)
+        {
+            ReportError(ex.InnerException ?? ex);
+        }
 
         if (_ownsClient) _client.Dispose();
         _stop.Dispose();
+    }
+
+    private void ReportError(Exception ex)
+    {
+        try { _options.OnError?.Invoke(ex); } catch { }
     }
 
     private static Uri BuildEndpoint(Uri endpoint)
@@ -77,33 +95,35 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         return new Uri(endpoint.AbsoluteUri.TrimEnd('/') + "/services/collector/event");
     }
 
-    private async Task RunAsync()
+    // Empty arrays are flush markers injected by the timer; real payloads are never empty.
+    private async Task RunTimerAsync()
     {
-        var reader = _channel.Reader;
-        var batch = new List<byte[]>(_options.BatchSize);
         try
         {
-            while (await reader.WaitToReadAsync(_stop.Token).ConfigureAwait(false))
-            {
-                batch.Clear();
-                using var window = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
-                window.CancelAfter(_options.FlushInterval);
-                try
-                {
-                    while (batch.Count < _options.BatchSize)
-                    {
-                        if (reader.TryRead(out var item)) batch.Add(item);
-                        else if (!await reader.WaitToReadAsync(window.Token).ConfigureAwait(false)) break;
-                    }
-                }
-                catch (OperationCanceledException) when (!_stop.IsCancellationRequested) { }
-
-                if (batch.Count > 0) await SendAsync(batch).ConfigureAwait(false);
-            }
+            while (await _timer.WaitForNextTickAsync(_stop.Token).ConfigureAwait(false))
+                _channel.Writer.TryWrite([]);
         }
         catch (OperationCanceledException) { }
     }
 
+    private async Task RunAsync()
+    {
+        var batch = new List<byte[]>(_options.BatchSize);
+        try
+        {
+            await foreach (var item in _channel.Reader.ReadAllAsync(_stop.Token).ConfigureAwait(false))
+            {
+                if (item.Length > 0) batch.Add(item);
+                if (batch.Count == 0 || (item.Length > 0 && batch.Count < _options.BatchSize)) continue;
+
+                await SendAsync(batch).ConfigureAwait(false);
+                batch.Clear();
+            }
+
+            if (batch.Count > 0) await SendAsync(batch).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+    }
     private async Task SendAsync(List<byte[]> batch)
     {
         var delay = _options.RetryDelay;
@@ -127,7 +147,7 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
             {
                 if (attempt >= _options.MaxRetries)
                 {
-                    try { _options.OnError?.Invoke(ex); } catch { }
+                    ReportError(ex);
                     return;
                 }
                 try { await Task.Delay(delay, _stop.Token).ConfigureAwait(false); }

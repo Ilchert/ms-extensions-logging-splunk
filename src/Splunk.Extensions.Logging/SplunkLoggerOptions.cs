@@ -25,7 +25,7 @@ public class SplunkLoggerOptions
     /// <summary>Maximum time to wait for a batch to fill.</summary>
     public TimeSpan FlushInterval { get; set; } = TimeSpan.FromSeconds(1);
 
-    /// <summary>Maximum number of queued events; further events are dropped.</summary>
+    /// <summary>Maximum number of queued events; when full, the oldest events are dropped.</summary>
     public int QueueCapacity { get; set; } = 10_000;
 
     /// <summary>Number of retries for failed requests.</summary>
