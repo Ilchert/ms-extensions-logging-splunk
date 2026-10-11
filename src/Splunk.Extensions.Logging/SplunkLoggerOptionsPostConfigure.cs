@@ -13,7 +13,7 @@ internal sealed class SplunkLoggerOptionsPostConfigure : IPostConfigureOptions<S
             options.Endpoint = new Uri(endpoint.AbsoluteUri.TrimEnd('/') + "/services/collector/event");
 
         options.HttpClient ??= new HttpClient();
-        if (!string.IsNullOrWhiteSpace(options.Token))
+        if (options.HttpClient.DefaultRequestHeaders.Authorization is null && !string.IsNullOrWhiteSpace(options.Token))
             options.HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Splunk", options.Token);
     }
 }

@@ -190,6 +190,22 @@ public class SplunkLoggerProviderTests
         var providers = sp.GetServices<ILoggerProvider>();
         Assert.Contains(providers, p => p is SplunkLoggerProvider);
     }
+
+    [Fact]
+    public void AddSplunk_with_service_provider_overload_configures_options()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton("secret-token");
+        services.AddLogging(b => b.AddSplunk((sp, o) =>
+        {
+            o.Endpoint = new Uri("https://splunk:8088");
+            o.Token = sp.GetRequiredService<string>();
+        }));
+        using var sp = services.BuildServiceProvider();
+        var options = sp.GetRequiredService<IOptions<SplunkLoggerOptions>>().Value;
+        Assert.Equal("secret-token", options.Token);
+        Assert.Equal("Splunk secret-token", options.HttpClient.DefaultRequestHeaders.Authorization!.ToString());
+    }
 }
 
 
