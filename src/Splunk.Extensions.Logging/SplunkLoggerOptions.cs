@@ -40,6 +40,9 @@ public class SplunkLoggerOptions
     /// <summary>Time allowed to flush queued events on dispose.</summary>
     public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>Called when a batch could not be delivered and was dropped.</summary>
+    /// <summary>Called when a batch could not be delivered and was dropped, or the provider failed to shut down cleanly.</summary>
     public Action<Exception>? OnError { get; set; }
+
+    /// <summary>Called for each event dropped because the queue was full. Runs on the logging thread, so keep it cheap.</summary>
+    public Action? OnDropped { get; set; }
 }

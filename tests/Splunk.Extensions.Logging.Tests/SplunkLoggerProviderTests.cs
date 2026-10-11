@@ -139,12 +139,14 @@ public class SplunkLoggerProviderTests
     public async Task Drops_oldest_events_when_queue_is_full()
     {
         var handler = new GatedHandler();
+        var dropped = 0;
         var provider = Build(new SplunkLoggerOptions
         {
             Endpoint = new Uri("https://splunk:8088"),
             Token = "tok",
             BatchSize = 1,
             QueueCapacity = 2,
+            OnDropped = () => dropped++,
             FlushInterval = TimeSpan.FromHours(1),
         }, handler);
         var logger = provider.CreateLogger("Cat");
@@ -159,6 +161,7 @@ public class SplunkLoggerProviderTests
 
         var messages = handler.Bodies.Select(b => JsonDocument.Parse(b).RootElement.GetProperty("event").GetString()!).ToArray();
         Assert.Equal(["m1", "m5", "m6"], messages);
+        Assert.Equal(3, dropped);
     }
 
     [Fact]

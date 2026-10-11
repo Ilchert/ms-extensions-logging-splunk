@@ -27,7 +27,7 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
-        });
+        }, OnItemDropped);
         _timer = new PeriodicTimer(_options.FlushInterval);
         _timerTask = Task.Run(RunTimerAsync);
         _worker = Task.Run(RunAsync);
@@ -65,6 +65,12 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         }
 
         _stop.Dispose();
+    }
+
+    private void OnItemDropped(byte[] item)
+    {
+        if (item.Length > 0)
+            try { _options.OnDropped?.Invoke(); } catch { }
     }
 
     private void ReportError(Exception ex)
