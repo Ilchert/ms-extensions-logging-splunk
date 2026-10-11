@@ -13,7 +13,6 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     private readonly SplunkLoggerOptions _options;
     private readonly HttpClient _client;
     private readonly bool _ownsClient;
-    private readonly Uri _endpoint;
     private readonly Channel<byte[]> _channel;
     private readonly Task _worker;
     private readonly Task _timerTask;
@@ -26,14 +25,6 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     internal SplunkLoggerProvider(IOptions<SplunkLoggerOptions> options, HttpClient? client)
     {
         _options = options.Value;
-        if (_options.Endpoint is null)
-            throw new ArgumentException("SplunkLoggerOptions.Endpoint is required.", nameof(options));
-        if (string.IsNullOrWhiteSpace(_options.Token))
-            throw new ArgumentException("SplunkLoggerOptions.Token is required.", nameof(options));
-        ArgumentOutOfRangeException.ThrowIfLessThan(_options.BatchSize, 1);
-        ArgumentOutOfRangeException.ThrowIfLessThan(_options.QueueCapacity, 1);
-
-        _endpoint = BuildEndpoint(_options.Endpoint);
         _ownsClient = client is null;
         _client = client ?? new HttpClient();
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Splunk", _options.Token);
@@ -88,13 +79,6 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         try { _options.OnError?.Invoke(ex); } catch { }
     }
 
-    private static Uri BuildEndpoint(Uri endpoint)
-    {
-        if (endpoint.AbsolutePath.Contains("/services/collector", StringComparison.OrdinalIgnoreCase))
-            return endpoint;
-        return new Uri(endpoint.AbsoluteUri.TrimEnd('/') + "/services/collector/event");
-    }
-
     // Empty arrays are flush markers injected by the timer; real payloads are never empty.
     private async Task RunTimerAsync()
     {
@@ -127,7 +111,7 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         {
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
+                using var request = new HttpRequestMessage(HttpMethod.Post, _options.Endpoint)
                 {
                     Content = new BufferListContent(batch),
                 };

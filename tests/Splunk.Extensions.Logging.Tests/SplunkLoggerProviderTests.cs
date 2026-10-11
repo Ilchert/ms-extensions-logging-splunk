@@ -21,19 +21,28 @@ public class SplunkLoggerProviderTests
         }
     }
 
-    private static SplunkLoggerProvider Create(CaptureHandler handler) =>
-        new(Options.Create(new SplunkLoggerOptions
+    private static SplunkLoggerProvider Create(CaptureHandler handler)
+    {
+        var options = new SplunkLoggerOptions
         {
             Endpoint = new Uri("https://splunk:8088"),
             Token = "tok",
             Index = "main",
             FlushInterval = TimeSpan.FromMilliseconds(50),
-        }), new HttpClient(handler));
+        };
+        new SplunkLoggerOptionsPostConfigure().PostConfigure(null, options);
+        return new(Options.Create(options), new HttpClient(handler));
+    }
 
     [Fact]
     public void Requires_endpoint_and_token()
     {
-        Assert.Throws<ArgumentException>(() => new SplunkLoggerProvider(Options.Create(new SplunkLoggerOptions())));
+        using var services = new ServiceCollection()
+            .AddLogging(b => b.AddSplunk(_ => { }))
+            .BuildServiceProvider();
+        var ex = Assert.Throws<OptionsValidationException>(() => services.GetServices<ILoggerProvider>().ToList());
+        Assert.Contains(ex.Failures, f => f.Contains("Endpoint"));
+        Assert.Contains(ex.Failures, f => f.Contains("Token"));
     }
 
     [Fact]
