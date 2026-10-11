@@ -17,6 +17,7 @@ Guidance for AI coding agents working in this repository.
   - `SplunkLoggingBuilderExtensions` – `AddSplunk` overloads
 - `tests/Splunk.Extensions.Logging.Tests/` – xunit v3 unit tests
 - `tests/Splunk.Extensions.Logging.IntegrationTests/` – sends the same logs via this provider and via OTel -> splunk-otel-collector, queries Splunk and asserts the indexed fields match (except an allow-list of intentional differences); skipped if Splunk is not running
+- `benchmarks/Splunk.Extensions.Logging.Benchmarks/` – BenchmarkDotNet; set `SPLUNK_BASELINE_DLL` to a Release build of another checkout (e.g. a `git worktree` of `main`) to compare against it: `dotnet run -c Release --project benchmarks/Splunk.Extensions.Logging.Benchmarks -- --filter "*"`
 - `tests/integration/` – `docker-compose.yml` (Splunk + splunk-otel-collector) and `otel-collector.yaml`
 
 ## Build & test
