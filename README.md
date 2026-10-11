@@ -29,12 +29,12 @@ Events follow the layout produced by the [splunk-otel-collector](https://github.
   "index": "main",
   "event": "Hello world",
   "fields": {
-    "otel.log.severity.text": "WARN",
+    "otel.log.severity.text": "Warning",
     "otel.log.severity.number": 13,
-    "otel.library.name": "MyApp.Category",
+    "scope.name": "MyApp.Category",
     "logrecord.event.id": 5,
     "otel.log.name": "Evt",
-    "exception.type": "System.InvalidOperationException",
+    "exception.type": "InvalidOperationException",
     "exception.message": "boom",
     "exception.stacktrace": "...",
     "trace_id": "...",
@@ -51,9 +51,9 @@ Events follow the layout produced by the [splunk-otel-collector](https://github.
 | Formatted message | `event` |
 | Time of logging (UTC) | `time` (epoch seconds) |
 | `SplunkLoggerOptions.Host` / `Source` / `SourceType` / `Index` | `host` / `source` / `sourcetype` / `index` |
-| `LogLevel` | `fields["otel.log.severity.text"]`: Trace=`TRACE`, Debug=`DEBUG`, Information=`INFO`, Warning=`WARN`, Error=`ERROR`, Critical=`FATAL` |
+| `LogLevel` | `fields["otel.log.severity.text"]`: Trace=`Trace`, Debug=`Debug`, Information=`Information`, Warning=`Warning`, Error=`Error`, Critical=`Critical` |
 | `LogLevel` | `fields["otel.log.severity.number"]`: 1, 5, 9, 13, 17, 21 respectively |
-| Category name | `fields["otel.library.name"]` |
+| Category name | `fields["scope.name"]` |
 | `EventId.Id` (when non-zero) | `fields["logrecord.event.id"]` |
 | `EventId.Name` | `fields["otel.log.name"]` |
 | `Exception` | `fields["exception.type"]`, `["exception.message"]`, `["exception.stacktrace"]` |

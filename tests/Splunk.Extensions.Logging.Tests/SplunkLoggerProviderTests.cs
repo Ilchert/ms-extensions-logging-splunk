@@ -61,13 +61,13 @@ public class SplunkLoggerProviderTests
         Assert.Equal("main", events[0].GetProperty("index").GetString());
         Assert.Equal("Hello world", events[0].GetProperty("event").GetString());
         var f = events[0].GetProperty("fields");
-        Assert.Equal("WARN", f.GetProperty("otel.log.severity.text").GetString());
+        Assert.Equal("Warning", f.GetProperty("otel.log.severity.text").GetString());
         Assert.Equal(13, f.GetProperty("otel.log.severity.number").GetInt32());
-        Assert.Equal("Cat", f.GetProperty("otel.library.name").GetString());
+        Assert.Equal("Cat", f.GetProperty("scope.name").GetString());
         Assert.Equal("world", f.GetProperty("Name").GetString());
         Assert.Equal(5, f.GetProperty("logrecord.event.id").GetInt32());
         Assert.Equal("Evt", f.GetProperty("otel.log.name").GetString());
-        Assert.Equal("System.InvalidOperationException", f.GetProperty("exception.type").GetString());
+        Assert.Equal("InvalidOperationException", f.GetProperty("exception.type").GetString());
         Assert.Equal("boom", f.GetProperty("exception.message").GetString());
         Assert.Equal(7, f.GetProperty("Id").GetInt32());    }
 
@@ -87,7 +87,7 @@ public class SplunkLoggerProviderTests
         Assert.Equal(ts.ToUnixTimeMilliseconds() / 1000.0, doc.RootElement.GetProperty("time").GetDouble());
         Assert.Equal("buffered", doc.RootElement.GetProperty("event").GetString());
         var f = doc.RootElement.GetProperty("fields");
-        Assert.Equal("ERROR", f.GetProperty("otel.log.severity.text").GetString());
+        Assert.Equal("Error", f.GetProperty("otel.log.severity.text").GetString());
         Assert.Equal(1, f.GetProperty("K").GetInt32());
     }
 
