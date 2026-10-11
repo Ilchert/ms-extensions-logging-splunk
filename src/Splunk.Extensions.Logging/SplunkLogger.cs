@@ -7,6 +7,24 @@ namespace Splunk.Extensions.Logging;
 
 internal sealed class SplunkLogger(string category, SplunkLoggerProvider provider) : ILogger, IBufferedLogger
 {
+    private static readonly JsonEncodedText s_time = JsonEncodedText.Encode("time");
+    private static readonly JsonEncodedText s_host = JsonEncodedText.Encode("host");
+    private static readonly JsonEncodedText s_source = JsonEncodedText.Encode("source");
+    private static readonly JsonEncodedText s_sourceType = JsonEncodedText.Encode("sourcetype");
+    private static readonly JsonEncodedText s_index = JsonEncodedText.Encode("index");
+    private static readonly JsonEncodedText s_event = JsonEncodedText.Encode("event");
+    private static readonly JsonEncodedText s_fields = JsonEncodedText.Encode("fields");
+    private static readonly JsonEncodedText s_severityText = JsonEncodedText.Encode("otel.log.severity.text");
+    private static readonly JsonEncodedText s_severityNumber = JsonEncodedText.Encode("otel.log.severity.number");
+    private static readonly JsonEncodedText s_libraryName = JsonEncodedText.Encode("otel.library.name");
+    private static readonly JsonEncodedText s_eventId = JsonEncodedText.Encode("logrecord.event.id");
+    private static readonly JsonEncodedText s_logName = JsonEncodedText.Encode("otel.log.name");
+    private static readonly JsonEncodedText s_exceptionType = JsonEncodedText.Encode("exception.type");
+    private static readonly JsonEncodedText s_exceptionMessage = JsonEncodedText.Encode("exception.message");
+    private static readonly JsonEncodedText s_exceptionStackTrace = JsonEncodedText.Encode("exception.stacktrace");
+    private static readonly JsonEncodedText s_traceId = JsonEncodedText.Encode("trace_id");
+    private static readonly JsonEncodedText s_spanId = JsonEncodedText.Encode("span_id");
+
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull
         => provider.ScopeProvider?.Push(state);
 
@@ -48,25 +66,25 @@ internal sealed class SplunkLogger(string category, SplunkLoggerProvider provide
         using (var w = new Utf8JsonWriter(stream))
         {
             w.WriteStartObject();
-            w.WriteNumber("time", timestamp.ToUnixTimeMilliseconds() / 1000.0);
-            if (o.Host is not null) w.WriteString("host", o.Host);
-            if (o.Source is not null) w.WriteString("source", o.Source);
-            if (o.SourceType is not null) w.WriteString("sourcetype", o.SourceType);
-            if (o.Index is not null) w.WriteString("index", o.Index);
+            w.WriteNumber(s_time, timestamp.ToUnixTimeMilliseconds() / 1000.0);
+            if (o.Host is not null) w.WriteString(s_host, o.Host);
+            if (o.Source is not null) w.WriteString(s_source, o.Source);
+            if (o.SourceType is not null) w.WriteString(s_sourceType, o.SourceType);
+            if (o.Index is not null) w.WriteString(s_index, o.Index);
 
-            w.WriteString("event", message);
+            w.WriteString(s_event, message);
 
-            w.WriteStartObject("fields");
-            w.WriteString("otel.log.severity.text", SeverityText(level));
-            w.WriteNumber("otel.log.severity.number", SeverityNumber(level));
-            w.WriteString("otel.library.name", category);
-            if (eventId.Id != 0) w.WriteNumber("logrecord.event.id", eventId.Id);
-            if (eventId.Name is not null) w.WriteString("otel.log.name", eventId.Name);
-            if (exceptionType is not null) w.WriteString("exception.type", exceptionType);
-            if (exceptionMessage is not null) w.WriteString("exception.message", exceptionMessage);
-            if (exceptionStackTrace is not null) w.WriteString("exception.stacktrace", exceptionStackTrace);
-            if (traceId is { } tid) w.WriteString("trace_id", tid.ToHexString());
-            if (spanId is { } sid) w.WriteString("span_id", sid.ToHexString());
+            w.WriteStartObject(s_fields);
+            w.WriteString(s_severityText, SeverityText(level));
+            w.WriteNumber(s_severityNumber, SeverityNumber(level));
+            w.WriteString(s_libraryName, category);
+            if (eventId.Id != 0) w.WriteNumber(s_eventId, eventId.Id);
+            if (eventId.Name is not null) w.WriteString(s_logName, eventId.Name);
+            if (exceptionType is not null) w.WriteString(s_exceptionType, exceptionType);
+            if (exceptionMessage is not null) w.WriteString(s_exceptionMessage, exceptionMessage);
+            if (exceptionStackTrace is not null) w.WriteString(s_exceptionStackTrace, exceptionStackTrace);
+            if (traceId is { } tid) w.WriteString(s_traceId, tid.ToHexString());
+            if (spanId is { } sid) w.WriteString(s_spanId, sid.ToHexString());
 
             if (props is not null)
             {

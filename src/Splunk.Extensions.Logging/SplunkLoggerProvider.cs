@@ -98,12 +98,8 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     // Empty arrays are flush markers injected by the timer; real payloads are never empty.
     private async Task RunTimerAsync()
     {
-        try
-        {
-            while (await _timer.WaitForNextTickAsync(_stop.Token).ConfigureAwait(false))
-                _channel.Writer.TryWrite([]);
-        }
-        catch (OperationCanceledException) { }
+        while (await _timer.WaitForNextTickAsync().ConfigureAwait(false))
+            _channel.Writer.TryWrite([]);
     }
 
     private async Task RunAsync()
