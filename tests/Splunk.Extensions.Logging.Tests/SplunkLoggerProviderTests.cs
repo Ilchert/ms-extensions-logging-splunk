@@ -30,8 +30,14 @@ public class SplunkLoggerProviderTests
             Index = "main",
             FlushInterval = TimeSpan.FromMilliseconds(50),
         };
+        return Build(options, handler);
+    }
+
+    private static SplunkLoggerProvider Build(SplunkLoggerOptions options, HttpMessageHandler handler)
+    {
+        options.HttpClient = new HttpClient(handler);
         new SplunkLoggerOptionsPostConfigure().PostConfigure(null, options);
-        return new(Options.Create(options), new HttpClient(handler));
+        return new(Options.Create(options));
     }
 
     [Fact]
@@ -133,14 +139,14 @@ public class SplunkLoggerProviderTests
     public async Task Drops_oldest_events_when_queue_is_full()
     {
         var handler = new GatedHandler();
-        var provider = new SplunkLoggerProvider(Options.Create(new SplunkLoggerOptions
+        var provider = Build(new SplunkLoggerOptions
         {
             Endpoint = new Uri("https://splunk:8088"),
             Token = "tok",
             BatchSize = 1,
             QueueCapacity = 2,
             FlushInterval = TimeSpan.FromHours(1),
-        }), new HttpClient(handler));
+        }, handler);
         var logger = provider.CreateLogger("Cat");
 
         // The worker takes the first event and blocks sending it, leaving the queue empty.
@@ -160,14 +166,14 @@ public class SplunkLoggerProviderTests
     {
         var handler = new GatedHandler();
         Exception? error = null;
-        var provider = new SplunkLoggerProvider(Options.Create(new SplunkLoggerOptions
+        var provider = Build(new SplunkLoggerOptions
         {
             Endpoint = new Uri("https://splunk:8088"),
             Token = "tok",
             BatchSize = 1,
             ShutdownTimeout = TimeSpan.FromMilliseconds(100),
             OnError = e => error = e,
-        }), new HttpClient(handler));
+        }, handler);
 
         provider.CreateLogger("Cat").LogInformation("stuck");
         provider.Dispose();

@@ -4,10 +4,13 @@ namespace Splunk.Extensions.Logging;
 public class SplunkLoggerOptions
 {
     /// <summary>Base HEC URL, e.g. https://splunk:8088. The /services/collector/event path is appended unless already present.</summary>
-    public Uri? Endpoint { get; set; }
+    public Uri Endpoint { get; set; } = null!;
 
     /// <summary>HEC token.</summary>
-    public string? Token { get; set; }
+    public string Token { get; set; } = null!;
+
+    /// <summary>HTTP client used to send events. Created if not set and never disposed by the provider. The Authorization header is set from <see cref="Token"/>.</summary>
+    public HttpClient HttpClient { get; set; } = null!;
 
     public string? Index { get; set; }
     public string? Source { get; set; }

@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -12,7 +11,6 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
 {
     private readonly SplunkLoggerOptions _options;
     private readonly HttpClient _client;
-    private readonly bool _ownsClient;
     private readonly Channel<byte[]> _channel;
     private readonly Task _worker;
     private readonly Task _timerTask;
@@ -20,14 +18,10 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     private readonly CancellationTokenSource _stop = new();
     private IExternalScopeProvider? _scopeProvider;
 
-    public SplunkLoggerProvider(IOptions<SplunkLoggerOptions> options) : this(options, null) { }
-
-    internal SplunkLoggerProvider(IOptions<SplunkLoggerOptions> options, HttpClient? client)
+    public SplunkLoggerProvider(IOptions<SplunkLoggerOptions> options)
     {
         _options = options.Value;
-        _ownsClient = client is null;
-        _client = client ?? new HttpClient();
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Splunk", _options.Token);
+        _client = _options.HttpClient;
 
         _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.QueueCapacity)
         {
@@ -70,7 +64,6 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
             ReportError(ex.InnerException ?? ex);
         }
 
-        if (_ownsClient) _client.Dispose();
         _stop.Dispose();
     }
 
