@@ -29,11 +29,13 @@ dotnet test
 
 Keep the build at 0 warnings and all tests passing.
 
+Stress/performance tests (`PooledBufferStressTests`) and integration tests are explicit (`[Fact(Explicit = true)]`): plain `dotnet test` skips them. Run the stress tests with `dotnet run --project tests/Splunk.Extensions.Logging.Tests -- -explicit only`.
+
 Integration tests need Docker (Splunk takes ~1-2 minutes to become healthy):
 
 ```powershell
 docker compose -f tests/integration/docker-compose.yml up -d
-dotnet test tests/Splunk.Extensions.Logging.IntegrationTests
+dotnet run --project tests/Splunk.Extensions.Logging.IntegrationTests -- -explicit only
 docker compose -f tests/integration/docker-compose.yml down
 ```
 
