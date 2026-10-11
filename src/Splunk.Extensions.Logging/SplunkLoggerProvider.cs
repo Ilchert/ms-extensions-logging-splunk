@@ -106,14 +106,6 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
 
     private async Task SendAsync(List<byte[]> batch)
     {
-        var body = new byte[batch.Sum(b => b.Length)];
-        var offset = 0;
-        foreach (var b in batch)
-        {
-            b.CopyTo(body, offset);
-            offset += b.Length;
-        }
-
         var delay = _options.RetryDelay;
         for (var attempt = 0; ; attempt++)
         {
@@ -121,9 +113,8 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
             {
                 using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
                 {
-                    Content = new ByteArrayContent(body),
+                    Content = new BufferListContent(batch),
                 };
-                request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
                 using var response = await _client.SendAsync(request, _stop.Token).ConfigureAwait(false);
                 response.EnsureSuccessStatusCode();
                 return;
