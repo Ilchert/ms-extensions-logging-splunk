@@ -182,6 +182,43 @@ public class SplunkLoggerProviderTests
     }
 
     [Fact]
+    public async Task RetryDelegatingHandler_retries_failures_then_succeeds()
+    {
+        var inner = new FlakyHandler(failures: 2);
+        using var client = new HttpClient(new RetryDelegatingHandler(3, TimeSpan.FromMilliseconds(1)) { InnerHandler = inner });
+
+        using var response = await client.PostAsync("https://splunk:8088", new StringContent("x"), TestContext.Current.CancellationToken);
+
+        Assert.True(response.IsSuccessStatusCode);
+        Assert.Equal(3, inner.Calls);
+    }
+
+    [Fact]
+    public async Task RetryDelegatingHandler_returns_last_response_after_max_retries()
+    {
+        var inner = new FlakyHandler(failures: 10);
+        using var client = new HttpClient(new RetryDelegatingHandler(2, TimeSpan.FromMilliseconds(1)) { InnerHandler = inner });
+
+        using var response = await client.PostAsync("https://splunk:8088", new StringContent("x"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(3, inner.Calls);
+    }
+
+    private sealed class FlakyHandler(int failures) : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(new HttpResponseMessage(Calls <= failures
+                ? System.Net.HttpStatusCode.ServiceUnavailable
+                : System.Net.HttpStatusCode.OK));
+        }
+    }
+
+    [Fact]
     public void AddSplunk_registers_provider()
     {
         var services = new ServiceCollection();

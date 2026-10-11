@@ -9,7 +9,7 @@ public class SplunkLoggerOptions
     /// <summary>HEC token.</summary>
     public string Token { get; set; } = null!;
 
-    /// <summary>HTTP client used to send events. Created if not set and never disposed by the provider. The Authorization header is set from <see cref="Token"/> unless already present.</summary>
+    /// <summary>HTTP client used to send events. Created if not set (with retries per <see cref="MaxRetries"/> and <see cref="RetryDelay"/>) and never disposed by the provider. The Authorization header is set from <see cref="Token"/> unless already present.</summary>
     public HttpClient HttpClient { get; set; } = null!;
 
     public string? Index { get; set; }

@@ -14,7 +14,45 @@ builder.Logging.AddSplunk(o =>
 });
 ```
 
-Events are queued, batched and sent to the HTTP Event Collector (`/services/collector/event`) on a background task, with retries. Pending events are flushed when the provider is disposed.
+Events are queued, batched and sent to the HTTP Event Collector (`/services/collector/event`) on a background task. Pending events are flushed when the provider is disposed.
+
+### Retries
+
+By default the provider creates its own `HttpClient` with a `RetryDelegatingHandler` that retries failed requests (exceptions and non-success status codes) up to `MaxRetries` times (default 3), starting with `RetryDelay` (default 1 second) and doubling it on each retry. Batches that still fail are dropped and reported through `OnError`.
+
+### Custom `HttpClient`
+
+Use the overload that receives the `IServiceProvider` to supply your own `HttpClient`, for example one created by `IHttpClientFactory`. The `Authorization: Splunk <token>` header is added from `Token` unless the client already has one. The provider never disposes the client, and `MaxRetries`/`RetryDelay` are not applied to it.
+
+```csharp
+builder.Services.AddHttpClient("splunk");
+
+builder.Logging.AddSplunk((sp, o) =>
+{
+    o.Endpoint = new Uri("https://splunk.example.com:8088");
+    o.Token = "<HEC token>";
+    o.HttpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient("splunk");
+});
+```
+
+### Retries with Polly
+
+To use [Polly](https://www.pollydocs.org/) instead of the built-in retries, add a resilience handler to the named client (package `Microsoft.Extensions.Http.Resilience`, or `Microsoft.Extensions.Http.Polly` for the legacy API):
+
+```csharp
+builder.Services.AddHttpClient("splunk")
+    .AddResilienceHandler("splunk", pipeline => pipeline
+        .AddRetry(new HttpRetryStrategyOptions
+        {
+            MaxRetryAttempts = 5,
+            Delay = TimeSpan.FromSeconds(1),
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true,
+        })
+        .AddTimeout(TimeSpan.FromSeconds(30)));
+```
+
+`AddStandardResilienceHandler()` is a ready-made alternative (retry, circuit breaker and timeouts). Then pass the client through `o.HttpClient` as shown above.
 
 ## Event format
 

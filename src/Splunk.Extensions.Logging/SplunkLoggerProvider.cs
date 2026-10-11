@@ -97,36 +97,24 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         }
         catch (OperationCanceledException) { }
     }
+
     private async Task SendAsync(List<byte[]> batch)
     {
-        var delay = _options.RetryDelay;
-        for (var attempt = 0; ; attempt++)
+        try
         {
-            try
+            using var request = new HttpRequestMessage(HttpMethod.Post, _options.Endpoint)
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, _options.Endpoint)
-                {
-                    Content = new BufferListContent(batch),
-                };
-                using var response = await _client.SendAsync(request, _stop.Token).ConfigureAwait(false);
-                response.EnsureSuccessStatusCode();
-                return;
-            }
-            catch (OperationCanceledException) when (_stop.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                if (attempt >= _options.MaxRetries)
-                {
-                    ReportError(ex);
-                    return;
-                }
-                try { await Task.Delay(delay, _stop.Token).ConfigureAwait(false); }
-                catch (OperationCanceledException) { return; }
-                delay += delay;
-            }
+                Content = new BufferListContent(batch),
+            };
+            using var response = await _client.SendAsync(request, _stop.Token).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            ReportError(ex);
         }
     }
 }
