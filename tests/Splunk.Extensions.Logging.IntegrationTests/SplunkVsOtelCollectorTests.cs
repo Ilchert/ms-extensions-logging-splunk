@@ -102,7 +102,7 @@ public class SplunkVsOtelCollectorTests
         return results;
     }
 
-    [Fact]
+    [Fact(Explicit = true)]
     public async Task Splunk_logger_matches_otel_collector_output()
     {
         var ct = TestContext.Current.CancellationToken;

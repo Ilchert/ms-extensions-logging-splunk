@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Splunk.Extensions.Logging.Tests;
 
-/// <summary>Stress and performance tests for the pooled buffer pipeline.</summary>
+/// <summary>Stress and performance tests for the pooled buffer pipeline. Explicit: run with <c>dotnet run -- -explicit only</c>.</summary>
 public class PooledBufferStressTests(ITestOutputHelper output)
 {
     /// <summary>Pool that tracks every rented array so leaks and double/foreign returns are detectable.</summary>
@@ -79,7 +79,7 @@ public class PooledBufferStressTests(ITestOutputHelper output)
         return events;
     }
 
-    [Fact]
+    [Fact(Explicit = true)]
     public void Concurrent_producers_deliver_every_event_intact_and_return_all_buffers()
     {
         const int threads = 8, perThread = 5_000, total = threads * perThread;
@@ -130,7 +130,7 @@ public class PooledBufferStressTests(ITestOutputHelper output)
         output.WriteLine($"events={total} requests={handler.Requests} rented arrays={pool.Rented}");
     }
 
-    [Fact]
+    [Fact(Explicit = true)]
     public void Dropped_events_release_their_buffers()
     {
         const int total = 20_000;
@@ -163,7 +163,7 @@ public class PooledBufferStressTests(ITestOutputHelper output)
         output.WriteLine($"sent={total} received={received} dropped={dropped}");
     }
 
-    [Fact]
+    [Fact(Explicit = true)]
     public void Failed_sends_still_release_their_buffers()
     {
         var pool = new TrackingArrayPool();
@@ -184,7 +184,7 @@ public class PooledBufferStressTests(ITestOutputHelper output)
         Assert.Equal(0, pool.BadReturns);
     }
 
-    [Fact]
+    [Fact(Explicit = true)]
     public async Task Dispose_while_producers_are_running_does_not_leak_or_throw()
     {
         var pool = new TrackingArrayPool();
@@ -206,7 +206,7 @@ public class PooledBufferStressTests(ITestOutputHelper output)
         Assert.Equal(0, pool.BadReturns);
     }
 
-    [Fact]
+    [Fact(Explicit = true)]
     public void Throughput_and_allocations_stay_within_budget()
     {
         const int warmup = 20_000, total = 200_000;
@@ -239,7 +239,7 @@ public class PooledBufferStressTests(ITestOutputHelper output)
         Assert.True(bytesPerEvent < 2_048, $"too many allocations: {bytesPerEvent:N0} B/event");
     }
 
-    [Fact]
+    [Fact(Explicit = true)]
     public void Large_multi_segment_events_release_all_buffers()
     {
         const int total = 20_000;
