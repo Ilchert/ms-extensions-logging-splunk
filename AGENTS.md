@@ -10,12 +10,14 @@ Guidance for AI coding agents working in this repository.
 
 - `src/Splunk.Extensions.Logging/` – library
   - `SplunkLoggerProvider` – bounded `Channel<byte[]>` (DropOldest), background worker, periodic flush timer, dispose flush
-  - `SplunkLogger` – `ILogger` + `IBufferedLogger`, JSON serialization (`JsonEncodedText` constants)
+  - `SplunkLogger` – `ILogger` + `IBufferedLogger`, JSON serialization (`JsonEncodedText` constants built from `"..."u8` literals)
   - `SplunkLoggerOptions` – options; `SplunkLoggerOptionsValidator` (`IValidateOptions`), `SplunkLoggerOptionsPostConfigure` (endpoint expansion, `HttpClient` + Authorization)
   - `RetryDelegatingHandler` – retry/backoff for the default `HttpClient`
   - `BufferListContent` – `HttpContent` over `List<byte[]>`
   - `SplunkLoggingBuilderExtensions` – `AddSplunk` overloads
-- `tests/Splunk.Extensions.Logging.Tests/` – xunit v3 tests
+- `tests/Splunk.Extensions.Logging.Tests/` – xunit v3 unit tests
+- `tests/Splunk.Extensions.Logging.IntegrationTests/` – sends the same logs via this provider and via OTel -> splunk-otel-collector, queries Splunk and asserts the indexed fields match (except an allow-list of intentional differences); skipped if Splunk is not running
+- `tests/integration/` – `docker-compose.yml` (Splunk + splunk-otel-collector) and `otel-collector.yaml`
 
 ## Build & test
 
@@ -26,8 +28,19 @@ dotnet test
 
 Keep the build at 0 warnings and all tests passing.
 
+Integration tests need Docker (Splunk takes ~1-2 minutes to become healthy):
+
+```powershell
+docker compose -f tests/integration/docker-compose.yml up -d
+dotnet test tests/Splunk.Extensions.Logging.IntegrationTests
+docker compose -f tests/integration/docker-compose.yml down
+```
+
+Run them after changing the event format. Don't set `sourcetype` to `_json`: Splunk silently drops events whose text is not JSON.
+
 ## Conventions
 
+- Use UTF-8 literals (`"..."u8`) for constant field names and values written by the serializer.
 - Follow `.editorconfig` (static fields are `s_camelCase`, private fields `_camelCase`).
 - Files use LF line endings (`.gitattributes`); don't introduce CRLF.
 - Package versions live in `Directory.Packages.props` (central package management). Avoid adding dependencies to the library.

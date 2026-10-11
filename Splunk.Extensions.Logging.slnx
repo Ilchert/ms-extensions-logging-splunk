@@ -8,4 +8,5 @@
   </Folder>
   <Project Path="src/Splunk.Extensions.Logging/Splunk.Extensions.Logging.csproj" />
   <Project Path="tests/Splunk.Extensions.Logging.Tests/Splunk.Extensions.Logging.Tests.csproj" />
+  <Project Path="tests/Splunk.Extensions.Logging.IntegrationTests/Splunk.Extensions.Logging.IntegrationTests.csproj" />
 </Solution>

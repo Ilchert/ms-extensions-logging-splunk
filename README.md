@@ -63,7 +63,6 @@ Events follow the layout produced by the [splunk-otel-collector](https://github.
   "time": 1760135438.834,
   "host": "my-host",
   "source": "my-app",
-  "sourcetype": "_json",
   "index": "main",
   "event": "Hello world",
   "fields": {
@@ -96,8 +95,21 @@ Events follow the layout produced by the [splunk-otel-collector](https://github.
 | `EventId.Name` | `fields["otel.log.name"]` |
 | `Exception` | `fields["exception.type"]`, `["exception.message"]`, `["exception.stacktrace"]` |
 | `Activity.Current` | `fields["trace_id"]`, `fields["span_id"]` |
-| Structured message properties | `fields[<name>]` (`{OriginalFormat}` omitted) |
+| Structured message properties | `fields[<name>]` (including `{OriginalFormat}`) |
+| Resource attributes | `fields["service.name"]` (`ServiceName` option, default `unknown_service:<process>`), `fields["telemetry.sdk.name"]`/`language`/`version` |
 | Scopes (key/value pairs, when `IncludeScopes` is on) | `fields[<name>]`; non-structured scopes are ignored |
+
+## Integration tests
+
+`tests/Splunk.Extensions.Logging.IntegrationTests` sends the same log calls through this provider (directly to HEC) and through the OpenTelemetry .NET logger (OTLP -> splunk-otel-collector -> HEC), then queries Splunk and compares the indexed events. They are skipped when Splunk is not running.
+
+```bash
+docker compose -f tests/integration/docker-compose.yml up -d   # Splunk takes ~1-2 minutes to become healthy
+dotnet test tests/Splunk.Extensions.Logging.IntegrationTests
+docker compose -f tests/integration/docker-compose.yml down
+```
+
+Event text, severity, exception, properties, scopes and `otel.log.name` are identical. Intentional differences: this provider also emits `scope.name` and `logrecord.event.id`, sets `host` to the machine name, and reports its own `telemetry.sdk.version`.
 
 ## Solution Structure
 

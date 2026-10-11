@@ -10,29 +10,34 @@ internal sealed class SplunkLogger(string category, SplunkLoggerProvider provide
 {
     private static readonly JavaScriptEncoder s_encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
     private static readonly JsonWriterOptions s_writerOptions = new() { Encoder = s_encoder };
-    private static readonly JsonEncodedText s_time = JsonEncodedText.Encode("time", s_encoder);
-    private static readonly JsonEncodedText s_host = JsonEncodedText.Encode("host", s_encoder);
-    private static readonly JsonEncodedText s_source = JsonEncodedText.Encode("source", s_encoder);
-    private static readonly JsonEncodedText s_sourceType = JsonEncodedText.Encode("sourcetype", s_encoder);
-    private static readonly JsonEncodedText s_index = JsonEncodedText.Encode("index", s_encoder);
-    private static readonly JsonEncodedText s_event = JsonEncodedText.Encode("event", s_encoder);
-    private static readonly JsonEncodedText s_fields = JsonEncodedText.Encode("fields", s_encoder);
-    private static readonly JsonEncodedText s_severityText = JsonEncodedText.Encode("otel.log.severity.text", s_encoder);
-    private static readonly JsonEncodedText s_severityNumber = JsonEncodedText.Encode("otel.log.severity.number", s_encoder);
-    private static readonly JsonEncodedText s_scopeName = JsonEncodedText.Encode("scope.name", s_encoder);
-    private static readonly JsonEncodedText s_eventId = JsonEncodedText.Encode("logrecord.event.id", s_encoder);
-    private static readonly JsonEncodedText s_logName = JsonEncodedText.Encode("otel.log.name", s_encoder);
-    private static readonly JsonEncodedText s_exceptionType = JsonEncodedText.Encode("exception.type", s_encoder);
-    private static readonly JsonEncodedText s_exceptionMessage = JsonEncodedText.Encode("exception.message", s_encoder);
-    private static readonly JsonEncodedText s_exceptionStackTrace = JsonEncodedText.Encode("exception.stacktrace", s_encoder);
-    private static readonly JsonEncodedText s_traceId = JsonEncodedText.Encode("trace_id", s_encoder);
-    private static readonly JsonEncodedText s_spanId = JsonEncodedText.Encode("span_id", s_encoder);
-    private static readonly JsonEncodedText s_sevTrace = JsonEncodedText.Encode("Trace", s_encoder);
-    private static readonly JsonEncodedText s_sevDebug = JsonEncodedText.Encode("Debug", s_encoder);
-    private static readonly JsonEncodedText s_sevInformation = JsonEncodedText.Encode("Information", s_encoder);
-    private static readonly JsonEncodedText s_sevWarning = JsonEncodedText.Encode("Warning", s_encoder);
-    private static readonly JsonEncodedText s_sevError = JsonEncodedText.Encode("Error", s_encoder);
-    private static readonly JsonEncodedText s_sevCritical = JsonEncodedText.Encode("Critical", s_encoder);
+    private static readonly JsonEncodedText s_time = JsonEncodedText.Encode("time"u8, s_encoder);
+    private static readonly JsonEncodedText s_host = JsonEncodedText.Encode("host"u8, s_encoder);
+    private static readonly JsonEncodedText s_source = JsonEncodedText.Encode("source"u8, s_encoder);
+    private static readonly JsonEncodedText s_sourceType = JsonEncodedText.Encode("sourcetype"u8, s_encoder);
+    private static readonly JsonEncodedText s_index = JsonEncodedText.Encode("index"u8, s_encoder);
+    private static readonly JsonEncodedText s_event = JsonEncodedText.Encode("event"u8, s_encoder);
+    private static readonly JsonEncodedText s_fields = JsonEncodedText.Encode("fields"u8, s_encoder);
+    private static readonly JsonEncodedText s_severityText = JsonEncodedText.Encode("otel.log.severity.text"u8, s_encoder);
+    private static readonly JsonEncodedText s_severityNumber = JsonEncodedText.Encode("otel.log.severity.number"u8, s_encoder);
+    private static readonly JsonEncodedText s_serviceName = JsonEncodedText.Encode("service.name"u8, s_encoder);
+    private static readonly JsonEncodedText s_sdkName = JsonEncodedText.Encode("telemetry.sdk.name"u8, s_encoder);
+    private static readonly JsonEncodedText s_sdkLanguage = JsonEncodedText.Encode("telemetry.sdk.language"u8, s_encoder);
+    private static readonly JsonEncodedText s_sdkVersion = JsonEncodedText.Encode("telemetry.sdk.version"u8, s_encoder);
+    private static readonly string s_version = typeof(SplunkLogger).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+    private static readonly JsonEncodedText s_scopeName = JsonEncodedText.Encode("scope.name"u8, s_encoder);
+    private static readonly JsonEncodedText s_eventId = JsonEncodedText.Encode("logrecord.event.id"u8, s_encoder);
+    private static readonly JsonEncodedText s_logName = JsonEncodedText.Encode("otel.log.name"u8, s_encoder);
+    private static readonly JsonEncodedText s_exceptionType = JsonEncodedText.Encode("exception.type"u8, s_encoder);
+    private static readonly JsonEncodedText s_exceptionMessage = JsonEncodedText.Encode("exception.message"u8, s_encoder);
+    private static readonly JsonEncodedText s_exceptionStackTrace = JsonEncodedText.Encode("exception.stacktrace"u8, s_encoder);
+    private static readonly JsonEncodedText s_traceId = JsonEncodedText.Encode("trace_id"u8, s_encoder);
+    private static readonly JsonEncodedText s_spanId = JsonEncodedText.Encode("span_id"u8, s_encoder);
+    private static readonly JsonEncodedText s_sevTrace = JsonEncodedText.Encode("Trace"u8, s_encoder);
+    private static readonly JsonEncodedText s_sevDebug = JsonEncodedText.Encode("Debug"u8, s_encoder);
+    private static readonly JsonEncodedText s_sevInformation = JsonEncodedText.Encode("Information"u8, s_encoder);
+    private static readonly JsonEncodedText s_sevWarning = JsonEncodedText.Encode("Warning"u8, s_encoder);
+    private static readonly JsonEncodedText s_sevError = JsonEncodedText.Encode("Error"u8, s_encoder);
+    private static readonly JsonEncodedText s_sevCritical = JsonEncodedText.Encode("Critical"u8, s_encoder);
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull
         => provider.ScopeProvider?.Push(state);
@@ -86,6 +91,10 @@ internal sealed class SplunkLogger(string category, SplunkLoggerProvider provide
             w.WriteStartObject(s_fields);
             w.WriteString(s_severityText, SeverityText(level));
             w.WriteNumber(s_severityNumber, SeverityNumber(level));
+            w.WriteString(s_serviceName, o.ServiceName);
+            w.WriteString(s_sdkName, "opentelemetry"u8);
+            w.WriteString(s_sdkLanguage, "dotnet"u8);
+            w.WriteString(s_sdkVersion, s_version);
             w.WriteString(s_scopeName, category);
             if (eventId.Id != 0) w.WriteNumber(s_eventId, eventId.Id);
             if (eventId.Name is not null) w.WriteString(s_logName, eventId.Name);
@@ -99,7 +108,6 @@ internal sealed class SplunkLogger(string category, SplunkLoggerProvider provide
             {
                 foreach (var (key, value) in props)
                 {
-                    if (key == "{OriginalFormat}") continue;
                     WriteValue(w, key, value);
                 }
             }

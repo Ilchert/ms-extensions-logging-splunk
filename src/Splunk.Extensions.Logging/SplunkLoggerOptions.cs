@@ -14,10 +14,14 @@ public class SplunkLoggerOptions
 
     public string? Index { get; set; }
     public string? Source { get; set; }
-    public string? SourceType { get; set; } = "_json";
+    /// <summary>Optional sourcetype. Avoid <c>_json</c>: Splunk silently drops events whose text is not JSON.</summary>
+    public string? SourceType { get; set; }
 
     /// <summary>Host field. Defaults to the machine name.</summary>
     public string? Host { get; set; } = Environment.MachineName;
+
+    /// <summary>Value of the <c>service.name</c> field. Defaults to <c>unknown_service:&lt;process name&gt;</c>, like the OpenTelemetry SDK.</summary>
+    public string ServiceName { get; set; } = "unknown_service:" + System.Diagnostics.Process.GetCurrentProcess().ProcessName;
 
     /// <summary>Include logger scopes in events.</summary>
     public bool IncludeScopes { get; set; } = true;
