@@ -21,6 +21,8 @@ internal static class SplunkJson
     internal static readonly JsonEncodedText ServiceName = JsonEncodedText.Encode("service.name"u8, Encoder);
     internal static readonly JsonEncodedText SdkName = JsonEncodedText.Encode("telemetry.sdk.name"u8, Encoder);
     internal static readonly JsonEncodedText SdkLanguage = JsonEncodedText.Encode("telemetry.sdk.language"u8, Encoder);
+    internal static readonly JsonEncodedText SdkNameValue = JsonEncodedText.Encode("opentelemetry"u8, Encoder);
+    internal static readonly JsonEncodedText SdkLanguageValue = JsonEncodedText.Encode("dotnet"u8, Encoder);
     internal static readonly JsonEncodedText SdkVersion = JsonEncodedText.Encode("telemetry.sdk.version"u8, Encoder);
     internal static readonly JsonEncodedText Version = JsonEncodedText.Encode(typeof(SplunkLogger).Assembly.GetName().Version?.ToString(3) ?? "0.0.0", Encoder);
     internal static readonly JsonEncodedText ScopeName = JsonEncodedText.Encode("scope.name"u8, Encoder);

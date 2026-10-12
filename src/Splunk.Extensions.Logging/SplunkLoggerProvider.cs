@@ -169,8 +169,8 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         w.WriteString(SplunkJson.SeverityTextField, SplunkJson.SeverityText(level));
         w.WriteNumber(SplunkJson.SeverityNumberField, SplunkJson.SeverityNumber(level));
         w.WriteString(SplunkJson.ServiceName, o.ServiceName);
-        w.WriteString(SplunkJson.SdkName, "opentelemetry"u8);
-        w.WriteString(SplunkJson.SdkLanguage, "dotnet"u8);
+        w.WriteString(SplunkJson.SdkName, SplunkJson.SdkNameValue);
+        w.WriteString(SplunkJson.SdkLanguage, SplunkJson.SdkLanguageValue);
         w.WriteString(SplunkJson.SdkVersion, SplunkJson.Version);
         w.WriteString(SplunkJson.ScopeName, category);
         if (eventId.Id != 0) w.WriteNumber(SplunkJson.EventId, eventId.Id);
