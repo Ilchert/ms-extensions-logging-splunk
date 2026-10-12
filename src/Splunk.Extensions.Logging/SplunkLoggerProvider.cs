@@ -1,4 +1,6 @@
 using System.Buffers;
+using System.Diagnostics;
+using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.IO.Pipelines;
 using System.Threading.Channels;
@@ -41,12 +43,7 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
 
     public void SetScopeProvider(IExternalScopeProvider scopeProvider) => _scopeProvider = scopeProvider;
 
-    internal SplunkLoggerOptions Options => _options;
-
     internal IExternalScopeProvider? ScopeProvider => _options.IncludeScopes ? _scopeProvider : null;
-
-    /// <summary>Gets a pooled writer; disposing it queues the written event.</summary>
-    internal PooledBufferWriter GetWriter() => new(this, _pool);
 
     internal void Enqueue(ReadOnlySequence<byte> entry)
     {
@@ -150,5 +147,59 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         {
             ReportError(ex);
         }
+    }
+
+    internal void Write(string category, DateTimeOffset timestamp, LogLevel level, EventId eventId, string? exceptionType,
+        string? exceptionMessage, string? exceptionStackTrace, string message, ActivityTraceId? traceId, ActivitySpanId? spanId,
+        IEnumerable<KeyValuePair<string, object?>>? props, bool includeScopes)
+    {
+        var o = _options;
+        using var buffer = new PooledBufferWriter(this, _pool);
+        using var w = new Utf8JsonWriter(buffer, SplunkJson.WriterOptions);
+        w.WriteStartObject();
+        w.WriteNumber(SplunkJson.Time, timestamp.ToUnixTimeMilliseconds() / 1000.0);
+        if (o.Host is not null) w.WriteString(SplunkJson.Host, o.Host);
+        if (o.Source is not null) w.WriteString(SplunkJson.Source, o.Source);
+        if (o.SourceType is not null) w.WriteString(SplunkJson.SourceType, o.SourceType);
+        if (o.Index is not null) w.WriteString(SplunkJson.Index, o.Index);
+
+        w.WriteString(SplunkJson.Event, message);
+
+        w.WriteStartObject(SplunkJson.Fields);
+        w.WriteString(SplunkJson.SeverityTextField, SplunkJson.SeverityText(level));
+        w.WriteNumber(SplunkJson.SeverityNumberField, SplunkJson.SeverityNumber(level));
+        w.WriteString(SplunkJson.ServiceName, o.ServiceName);
+        w.WriteString(SplunkJson.SdkName, "opentelemetry"u8);
+        w.WriteString(SplunkJson.SdkLanguage, "dotnet"u8);
+        w.WriteString(SplunkJson.SdkVersion, SplunkJson.Version);
+        w.WriteString(SplunkJson.ScopeName, category);
+        if (eventId.Id != 0) w.WriteNumber(SplunkJson.EventId, eventId.Id);
+        if (eventId.Name is not null) w.WriteString(SplunkJson.LogName, eventId.Name);
+        if (exceptionType is not null) w.WriteString(SplunkJson.ExceptionType, exceptionType);
+        if (exceptionMessage is not null) w.WriteString(SplunkJson.ExceptionMessage, exceptionMessage);
+        if (exceptionStackTrace is not null) w.WriteString(SplunkJson.ExceptionStackTrace, exceptionStackTrace);
+        if (traceId is { } tid) w.WriteString(SplunkJson.TraceId, tid.ToHexString());
+        if (spanId is { } sid) w.WriteString(SplunkJson.SpanId, sid.ToHexString());
+
+        if (props is not null)
+        {
+            foreach (var (key, value) in props)
+            {
+                SplunkJson.WriteValue(w, key, value);
+            }
+        }
+
+        if (includeScopes) ScopeProvider?.ForEachScope((scope, writer) =>
+        {
+            if (scope is IEnumerable<KeyValuePair<string, object?>> kvs)
+                foreach (var (key, value) in kvs)
+                {
+                    if (string.IsNullOrEmpty(key) || key == "{OriginalFormat}") continue;
+                    SplunkJson.WriteValue(writer, key, value);
+                }
+        }, w);
+        w.WriteEndObject();
+
+        w.WriteEndObject();
     }
 }
