@@ -1,4 +1,7 @@
 using System.Buffers;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Splunk.Extensions.Logging;
 
@@ -27,6 +30,22 @@ public class SplunkLoggerOptions
 
     /// <summary>Pool used for event buffers. Defaults to <see cref="ArrayPool{T}.Shared"/>.</summary>
     public ArrayPool<byte> ArrayPool { get; set; } = ArrayPool<byte>.Shared;
+
+    /// <summary>
+    /// Serializer options used when <see cref="SerializeComplexValues"/> is enabled. Defaults to named floating point literals
+    /// (<c>"NaN"</c>, <c>"Infinity"</c>) being allowed. The <see cref="JsonSerializerOptions.Encoder"/> (default <see cref="JavaScriptEncoder.UnsafeRelaxedJsonEscaping"/>) and the writer settings (indentation, new line, max depth) are also used for the event itself.
+    /// </summary>
+    public JsonSerializerOptions JsonSerializerOptions { get; set; } = new(JsonSerializerDefaults.General)
+    {
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>
+    /// Serialize property and scope values that are not strings, booleans or numbers (collections, dictionaries, custom types, ...)
+    /// as JSON using <see cref="JsonSerializerOptions"/>. When false they are written as their <c>ToString()</c> text.
+    /// </summary>
+    public bool SerializeComplexValues { get; set; }
 
     /// <summary>Include logger scopes in events.</summary>
     public bool IncludeScopes { get; set; } = true;

@@ -8,7 +8,6 @@ namespace Splunk.Extensions.Logging;
 internal static class SplunkJson
 {
     internal static readonly JavaScriptEncoder Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
-    internal static readonly JsonWriterOptions WriterOptions = new() { Encoder = Encoder };
     internal static readonly JsonEncodedText Time = JsonEncodedText.Encode("time"u8, Encoder);
     internal static readonly JsonEncodedText Host = JsonEncodedText.Encode("host"u8, Encoder);
     internal static readonly JsonEncodedText Source = JsonEncodedText.Encode("source"u8, Encoder);
@@ -59,20 +58,4 @@ internal static class SplunkJson
         LogLevel.Error => 17,
         _ => 21,
     };
-
-    internal static void WriteValue(Utf8JsonWriter w, string key, object? value)
-    {        
-        switch (value)
-        {
-            case null: w.WriteNull(key); break;
-            case string s: w.WriteString(key, s); break;
-            case bool b: w.WriteBoolean(key, b); break;
-            case int i: w.WriteNumber(key, i); break;
-            case long l: w.WriteNumber(key, l); break;
-            case double d when double.IsFinite(d): w.WriteNumber(key, d); break;
-            case float f when float.IsFinite(f): w.WriteNumber(key, f); break;
-            case decimal m: w.WriteNumber(key, m); break;
-            default: w.WriteString(key, Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)); break;
-        }
-    }
 }

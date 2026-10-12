@@ -14,6 +14,7 @@ namespace Splunk.Extensions.Logging;
 public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScope
 {
     private readonly SplunkLoggerOptions _options;
+    private readonly JsonWriterOptions _writerOptions;
     private readonly HttpClient _client;
     private readonly ArrayPool<byte> _pool;
     private readonly Channel<ReadOnlySequence<byte>> _channel;
@@ -26,6 +27,16 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     public SplunkLoggerProvider(IOptions<SplunkLoggerOptions> options)
     {
         _options = options.Value;
+        var json = _options.JsonSerializerOptions;
+        _writerOptions = new JsonWriterOptions
+        {
+            Encoder = json.Encoder,
+            Indented = json.WriteIndented,
+            IndentCharacter = json.IndentCharacter,
+            IndentSize = json.IndentSize,
+            NewLine = json.NewLine,
+            MaxDepth = json.MaxDepth,
+        };
         _client = _options.HttpClient;
         _pool = _options.ArrayPool;
 
@@ -155,7 +166,7 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     {
         var o = _options;
         using var buffer = new PooledBufferWriter(this, _pool);
-        using var w = new Utf8JsonWriter(buffer, SplunkJson.WriterOptions);
+        using var w = new Utf8JsonWriter(buffer, _writerOptions);
         w.WriteStartObject();
         w.WriteNumber(SplunkJson.Time, timestamp.ToUnixTimeMilliseconds() / 1000.0);
         if (o.Host is not null) w.WriteString(SplunkJson.Host, o.Host);
@@ -185,21 +196,41 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         {
             foreach (var (key, value) in props)
             {
-                SplunkJson.WriteValue(w, key, value);
+                WriteValue(w, key, value);
             }
         }
 
-        if (includeScopes) ScopeProvider?.ForEachScope((scope, writer) =>
+        if (includeScopes) ScopeProvider?.ForEachScope((scope, state) =>
         {
             if (scope is IEnumerable<KeyValuePair<string, object?>> kvs)
                 foreach (var (key, value) in kvs)
                 {
                     if (string.IsNullOrEmpty(key) || key == "{OriginalFormat}") continue;
-                    SplunkJson.WriteValue(writer, key, value);
+                    state.Provider.WriteValue(state.Writer, key, value);
                 }
-        }, w);
+        }, (Writer: w, Provider: this));
         w.WriteEndObject();
 
         w.WriteEndObject();
+    }
+
+    private void WriteValue(Utf8JsonWriter w, string key, object? value)
+    {
+        switch (value)
+        {
+            case null: w.WriteNull(key); break;
+            case string s: w.WriteString(key, s); break;
+            case bool b: w.WriteBoolean(key, b); break;
+            case int i: w.WriteNumber(key, i); break;
+            case long l: w.WriteNumber(key, l); break;
+            case double d when double.IsFinite(d): w.WriteNumber(key, d); break;
+            case float f when float.IsFinite(f): w.WriteNumber(key, f); break;
+            case decimal m: w.WriteNumber(key, m); break;
+            case var v when _options.SerializeComplexValues && _options.JsonSerializerOptions.TryGetTypeInfo(v.GetType(), out var typeInfo):
+                w.WritePropertyName(key);
+                JsonSerializer.Serialize(w, v, typeInfo);
+                break;
+            default: w.WriteString(key, Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)); break;
+        }
     }
 }

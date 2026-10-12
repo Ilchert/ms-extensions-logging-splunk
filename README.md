@@ -99,6 +99,12 @@ Events follow the layout produced by the [splunk-otel-collector](https://github.
 | Resource attributes | `fields["service.name"]` (`ServiceName` option, default `unknown_service:<process>`), `fields["telemetry.sdk.name"]`/`language`/`version` |
 | Scopes (key/value pairs, when `IncludeScopes` is on) | `fields[<name>]`; non-structured scopes are ignored |
 
+### Property value formatting
+
+Strings, booleans and finite numbers keep their JSON types. Everything else (including `NaN`/`Infinity`, `Guid`, dates, collections and custom types) is written as its invariant `ToString()` text by default.
+
+Set `SerializeComplexValues = true` to serialize non-primitive values (collections, dictionaries, custom types, ...) as JSON with `SplunkLoggerOptions.JsonSerializerOptions`. By default these options allow named floating point literals (`"NaN"`, `"Infinity"`). The options' `Encoder` (default `UnsafeRelaxedJsonEscaping`) and writer settings (`WriteIndented`, `IndentCharacter`, `IndentSize`, `NewLine`, `MaxDepth`) are also used for the event itself. Reflection-based serialization is not trim/AOT-safe; supply a source-generated `TypeInfoResolver` in the options for such apps.
+
 ## Integration tests
 
 `tests/Splunk.Extensions.Logging.IntegrationTests` sends the same log calls through this provider (directly to HEC) and through the OpenTelemetry .NET logger (OTLP -> splunk-otel-collector -> HEC), then queries Splunk and compares the indexed events. The test is explicit, so it only runs when requested with `-explicit only`; it is skipped if Splunk is not running.

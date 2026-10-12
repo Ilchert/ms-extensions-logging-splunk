@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace Splunk.Extensions.Logging.Tests;
 
-public class ValueFormattingTests(ITestOutputHelper output)
+public class ValueFormattingTests
 {
     private sealed class CaptureHandler : HttpMessageHandler
     {
@@ -26,16 +26,23 @@ public class ValueFormattingTests(ITestOutputHelper output)
 
     private enum Color { Red = 1, Green = 2 }
 
-    private static JsonElement LogAndGetFields(Action<ILogger> log)
+    private static SplunkLoggerOptions CreateOptions(CaptureHandler handler, Action<SplunkLoggerOptions>? configure)
     {
-        var handler = new CaptureHandler();
         var options = new SplunkLoggerOptions
         {
             Endpoint = new Uri("https://splunk:8088"),
             Token = "tok",
             HttpClient = new HttpClient(handler),
         };
+        configure?.Invoke(options);
         new SplunkLoggerOptionsPostConfigure().PostConfigure(null, options);
+        return options;
+    }
+
+    private static JsonElement LogAndGetFields(Action<ILogger> log, Action<SplunkLoggerOptions>? configure = null)
+    {
+        var handler = new CaptureHandler();
+        var options = CreateOptions(handler, configure);
         var provider = new SplunkLoggerProvider(Options.Create(options));
         log(provider.CreateLogger("Cat"));
         provider.Dispose();
@@ -95,32 +102,68 @@ public class ValueFormattingTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Collections_are_written_as_a_single_field_and_the_message_lists_items()
+    public void Collections_and_custom_types_are_written_as_text_by_default()
     {
-        var handler = new CaptureHandler();
-        var options = new SplunkLoggerOptions
-        {
-            Endpoint = new Uri("https://splunk:8088"),
-            Token = "tok",
-            HttpClient = new HttpClient(handler),
-        };
-        new SplunkLoggerOptionsPostConfigure().PostConfigure(null, options);
-        var provider = new SplunkLoggerProvider(Options.Create(options));
-        provider.CreateLogger("Cat").LogInformation("{Ints} {Names} {Map}",
-            new List<int> { 1, 2, 3 }, new[] { "a", "b" }, new Dictionary<string, int> { ["k"] = 1 });
-        provider.Dispose();
+        var f = LogAndGetFields(l => l.LogInformation("{Ints} {Customer}", new List<int> { 1, 2 }, new Customer("Ann")));
 
-        output.WriteLine(handler.Body);
-        using var doc = JsonDocument.Parse(handler.Body);
-        var root = doc.RootElement;
-        Assert.Equal("1, 2, 3 a, b [k, 1]", root.GetProperty("event").GetString());
-
-        var f = root.GetProperty("fields");
         Assert.Equal(JsonValueKind.String, f.GetProperty("Ints").ValueKind);
-        Assert.Equal(JsonValueKind.String, f.GetProperty("Names").ValueKind);
-        Assert.Equal(JsonValueKind.String, f.GetProperty("Map").ValueKind);
+        Assert.Equal("Customer(Ann)", f.GetProperty("Customer").GetString());
     }
 
+    [Fact]
+    public void Complex_values_are_serialized_as_json_when_enabled()
+    {
+        var f = LogAndGetFields(l => l.LogInformation("{Ints} {Names} {Map} {Point} {Id} {Nested}",
+            new List<int> { 1, 2, 3 }, new[] { "a", "b" }, new Dictionary<string, int> { ["k"] = 1 },
+            new Point(1, 2), Guid.Parse("0f8fad5b-d9cb-469f-a165-70867728950e"), new { Items = new[] { 1.5, 2.5 } }),
+            o => o.SerializeComplexValues = true);
+
+        Assert.Equal([1, 2, 3], f.GetProperty("Ints").EnumerateArray().Select(e => e.GetInt32()));
+        Assert.Equal(["a", "b"], f.GetProperty("Names").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(1, f.GetProperty("Map").GetProperty("k").GetInt32());
+        Assert.Equal(1, f.GetProperty("Point").GetProperty("X").GetInt32());
+        Assert.Equal(2, f.GetProperty("Point").GetProperty("Y").GetInt32());
+        Assert.Equal("0f8fad5b-d9cb-469f-a165-70867728950e", f.GetProperty("Id").GetString());
+        Assert.Equal([1.5, 2.5], f.GetProperty("Nested").GetProperty("Items").EnumerateArray().Select(e => e.GetDouble()));
+    }
+
+    [Fact]
+    public void Non_finite_numbers_inside_complex_values_use_named_literals()
+    {
+        var f = LogAndGetFields(l => l.LogInformation("{Values}", new[] { double.NaN, double.PositiveInfinity, 1.0 }),
+            o => o.SerializeComplexValues = true);
+
+        Assert.Equal(["NaN", "Infinity", null], f.GetProperty("Values").EnumerateArray()
+            .Select(e => e.ValueKind == JsonValueKind.String ? e.GetString() : null));
+    }
+
+    [Fact]
+    public void Custom_json_serializer_options_are_used()
+    {
+        var f = LogAndGetFields(l => l.LogInformation("{Point}", new Point(1, 2)), o =>
+        {
+            o.SerializeComplexValues = true;
+            o.JsonSerializerOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        });
+
+        Assert.Equal(1, f.GetProperty("Point").GetProperty("x").GetInt32());
+    }
+
+    [Fact]
+    public void Scope_values_are_serialized_when_enabled()
+    {
+        var handler = new CaptureHandler();
+        var options = CreateOptions(handler, o => o.SerializeComplexValues = true);
+        var provider = new SplunkLoggerProvider(Options.Create(options));
+        provider.SetScopeProvider(new LoggerExternalScopeProvider());
+        var logger = provider.CreateLogger("Cat");
+        using (logger.BeginScope(new Dictionary<string, object?> { ["Tags"] = new[] { "x", "y" } }))
+            logger.LogInformation("hi");
+        provider.Dispose();
+
+        using var doc = JsonDocument.Parse(handler.Body);
+        Assert.Equal(["x", "y"], doc.RootElement.GetProperty("fields").GetProperty("Tags").EnumerateArray().Select(e => e.GetString()));
+    }
     [Fact]
     public void Special_characters_are_not_over_escaped()
     {
