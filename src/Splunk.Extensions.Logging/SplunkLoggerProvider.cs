@@ -1,4 +1,5 @@
-using System.Text;
+using System.Diagnostics;
+using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -10,6 +11,7 @@ namespace Splunk.Extensions.Logging;
 public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScope
 {
     private readonly SplunkLoggerOptions _options;
+    private readonly JsonWriterOptions _writerOptions;
     private readonly HttpClient _client;
     private readonly Channel<byte[]> _channel;
     private readonly Task _worker;
@@ -21,6 +23,16 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     public SplunkLoggerProvider(IOptions<SplunkLoggerOptions> options)
     {
         _options = options.Value;
+        var json = _options.JsonSerializerOptions;
+        _writerOptions = new JsonWriterOptions
+        {
+            Encoder = json.Encoder,
+            Indented = json.WriteIndented,
+            IndentCharacter = json.IndentCharacter,
+            IndentSize = json.IndentSize,
+            NewLine = json.NewLine,
+            MaxDepth = json.MaxDepth,
+        };
         _client = _options.HttpClient;
 
         _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.QueueCapacity)
@@ -36,8 +48,6 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     public ILogger CreateLogger(string categoryName) => new SplunkLogger(categoryName, this);
 
     public void SetScopeProvider(IExternalScopeProvider scopeProvider) => _scopeProvider = scopeProvider;
-
-    internal SplunkLoggerOptions Options => _options;
 
     internal IExternalScopeProvider? ScopeProvider => _options.IncludeScopes ? _scopeProvider : null;
 
@@ -121,6 +131,98 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         catch (Exception ex)
         {
             ReportError(ex);
+        }
+    }
+
+    internal void Write(string category, DateTimeOffset timestamp, LogLevel level, EventId eventId, string? exceptionType,
+        string? exceptionMessage, string? exceptionStackTrace, string message, ActivityTraceId? traceId, ActivitySpanId? spanId,
+        IEnumerable<KeyValuePair<string, object?>>? props, bool includeScopes)
+    {
+        var o = _options;
+        try
+        {
+            using var stream = new MemoryStream();
+            using (var w = new Utf8JsonWriter(stream, _writerOptions))
+            {
+                w.WriteStartObject();
+                w.WriteNumber(SplunkJson.Time, timestamp.ToUnixTimeMilliseconds() / 1000.0);
+                if (o.Host is not null) w.WriteString(SplunkJson.Host, o.Host);
+                if (o.Source is not null) w.WriteString(SplunkJson.Source, o.Source);
+                if (o.SourceType is not null) w.WriteString(SplunkJson.SourceType, o.SourceType);
+                if (o.Index is not null) w.WriteString(SplunkJson.Index, o.Index);
+
+                w.WriteString(SplunkJson.Event, message);
+
+                w.WriteStartObject(SplunkJson.Fields);
+                w.WriteString(SplunkJson.SeverityTextField, SplunkJson.SeverityText(level));
+                w.WriteNumber(SplunkJson.SeverityNumberField, SplunkJson.SeverityNumber(level));
+                w.WriteString(SplunkJson.ServiceName, o.ServiceName);
+                w.WriteString(SplunkJson.SdkName, SplunkJson.SdkNameValue);
+                w.WriteString(SplunkJson.SdkLanguage, SplunkJson.SdkLanguageValue);
+                w.WriteString(SplunkJson.SdkVersion, SplunkJson.Version);
+                w.WriteString(SplunkJson.ScopeName, category);
+                if (eventId.Id != 0) w.WriteNumber(SplunkJson.EventId, eventId.Id);
+                if (eventId.Name is not null) w.WriteString(SplunkJson.LogName, eventId.Name);
+                if (exceptionType is not null) w.WriteString(SplunkJson.ExceptionType, exceptionType);
+                if (exceptionMessage is not null) w.WriteString(SplunkJson.ExceptionMessage, exceptionMessage);
+                if (exceptionStackTrace is not null) w.WriteString(SplunkJson.ExceptionStackTrace, exceptionStackTrace);
+                if (traceId is { } tid) w.WriteString(SplunkJson.TraceId, tid.ToHexString());
+                if (spanId is { } sid) w.WriteString(SplunkJson.SpanId, sid.ToHexString());
+
+                if (props is not null)
+                {
+                    foreach (var (key, value) in props)
+                    {
+                        WriteValue(w, key, value);
+                    }
+                }
+
+                if (includeScopes) ScopeProvider?.ForEachScope((scope, state) =>
+                {
+                    if (scope is IEnumerable<KeyValuePair<string, object?>> kvs)
+                        foreach (var (key, value) in kvs)
+                        {
+                            if (string.IsNullOrEmpty(key) || key == "{OriginalFormat}") continue;
+                            state.Provider.WriteValue(state.Writer, key, value);
+                        }
+                }, (Writer: w, Provider: this));
+                w.WriteEndObject();
+
+                w.WriteEndObject();
+            }
+            Enqueue(stream.ToArray());
+        }
+        catch (Exception ex)
+        {
+            ReportError(ex);
+        }
+    }
+
+    private void WriteValue(Utf8JsonWriter w, string key, object? value)
+    {
+        if (_options.SerializeComplexValues)
+        {
+            w.WritePropertyName(key);
+            if (value is null)
+                w.WriteNullValue();
+            else if (_options.JsonSerializerOptions.TryGetTypeInfo(value.GetType(), out var typeInfo))
+                JsonSerializer.Serialize(w, value, typeInfo);
+            else
+                w.WriteStringValue(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture));
+            return;
+        }
+
+        switch (value)
+        {
+            case null: w.WriteNull(key); break;
+            case string s: w.WriteString(key, s); break;
+            case bool b: w.WriteBoolean(key, b); break;
+            case int i: w.WriteNumber(key, i); break;
+            case long l: w.WriteNumber(key, l); break;
+            case double d when double.IsFinite(d): w.WriteNumber(key, d); break;
+            case float f when float.IsFinite(f): w.WriteNumber(key, f); break;
+            case decimal m: w.WriteNumber(key, m); break;
+            default: w.WriteString(key, Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)); break;
         }
     }
 }
