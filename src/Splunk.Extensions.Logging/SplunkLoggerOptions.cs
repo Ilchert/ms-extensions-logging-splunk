@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -26,6 +27,9 @@ public class SplunkLoggerOptions
 
     /// <summary>Value of the <c>service.name</c> field. Defaults to <c>unknown_service:&lt;process name&gt;</c>, like the OpenTelemetry SDK.</summary>
     public string ServiceName { get; set; } = "unknown_service:" + System.Diagnostics.Process.GetCurrentProcess().ProcessName;
+
+    /// <summary>Pool used for event buffers. Defaults to <see cref="ArrayPool{T}.Shared"/>.</summary>
+    public ArrayPool<byte> ArrayPool { get; set; } = ArrayPool<byte>.Shared;
 
     /// <summary>
     /// Serializer options used when <see cref="SerializeComplexValues"/> is enabled. Defaults to named floating point literals

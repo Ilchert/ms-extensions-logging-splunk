@@ -1,5 +1,8 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Runtime.InteropServices;
+using System.IO.Pipelines;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -13,7 +16,8 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
     private readonly SplunkLoggerOptions _options;
     private readonly JsonWriterOptions _writerOptions;
     private readonly HttpClient _client;
-    private readonly Channel<byte[]> _channel;
+    private readonly ArrayPool<byte> _pool;
+    private readonly Channel<ReadOnlySequence<byte>> _channel;
     private readonly Task _worker;
     private readonly Task _timerTask;
     private readonly PeriodicTimer _timer;
@@ -34,8 +38,9 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
             MaxDepth = json.MaxDepth,
         };
         _client = _options.HttpClient;
+        _pool = _options.ArrayPool;
 
-        _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.QueueCapacity)
+        _channel = Channel.CreateBounded<ReadOnlySequence<byte>>(new BoundedChannelOptions(_options.QueueCapacity)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
@@ -51,7 +56,10 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
 
     internal IExternalScopeProvider? ScopeProvider => _options.IncludeScopes ? _scopeProvider : null;
 
-    internal void Enqueue(byte[] payload) => _channel.Writer.TryWrite(payload);
+    internal void Enqueue(ReadOnlySequence<byte> entry)
+    {
+        if (!_channel.Writer.TryWrite(entry)) Return(entry);
+    }
 
     /// <summary>Flushes queued events (bounded by ShutdownTimeout) and releases resources.</summary>
     public void Dispose()
@@ -77,9 +85,11 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         _stop.Dispose();
     }
 
-    private void OnItemDropped(byte[] item)
+    private void OnItemDropped(ReadOnlySequence<byte> item)
     {
-        if (item.Length > 0)
+        var isEvent = !item.IsEmpty;
+        Return(item);
+        if (isEvent)
             try { _options.OnDropped?.Invoke(); } catch { }
     }
 
@@ -88,33 +98,49 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         try { _options.OnError?.Invoke(ex); } catch { }
     }
 
-    // Empty arrays are flush markers injected by the timer; real payloads are never empty.
     private async Task RunTimerAsync()
     {
         while (await _timer.WaitForNextTickAsync().ConfigureAwait(false))
-            _channel.Writer.TryWrite([]);
+            _channel.Writer.TryWrite(default);
     }
 
     private async Task RunAsync()
     {
-        var batch = new List<byte[]>(_options.BatchSize);
+        var batch = new List<ReadOnlySequence<byte>>(_options.BatchSize);
         try
         {
             await foreach (var item in _channel.Reader.ReadAllAsync(_stop.Token).ConfigureAwait(false))
             {
-                if (item.Length > 0) batch.Add(item);
-                if (batch.Count == 0 || (item.Length > 0 && batch.Count < _options.BatchSize)) continue;
+                if (!item.IsEmpty) batch.Add(item);
+                if (batch.Count == 0 || (!item.IsEmpty && batch.Count < _options.BatchSize)) continue;
 
                 await SendAsync(batch).ConfigureAwait(false);
-                batch.Clear();
+                ReleaseBatch(batch);
             }
 
             if (batch.Count > 0) await SendAsync(batch).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
+        finally
+        {
+            ReleaseBatch(batch);
+        }
     }
 
-    private async Task SendAsync(List<byte[]> batch)
+    internal void Return(ReadOnlySequence<byte> sequence)
+    {
+        foreach (var memory in sequence)
+            if (MemoryMarshal.TryGetArray(memory, out var segment) && segment.Array is { } array)
+                _pool.Return(array);
+    }
+
+    private void ReleaseBatch(List<ReadOnlySequence<byte>> batch)
+    {
+        foreach (var e in batch) Return(e);
+        batch.Clear();
+    }
+
+    private async Task SendAsync(List<ReadOnlySequence<byte>> batch)
     {
         try
         {
@@ -139,11 +165,10 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
         IEnumerable<KeyValuePair<string, object?>>? props, bool includeScopes)
     {
         var o = _options;
+        using var buffer = new PooledBufferWriter(this, _pool);
         try
         {
-            using var stream = new MemoryStream();
-            using (var w = new Utf8JsonWriter(stream, _writerOptions))
-            {
+            using var w = new Utf8JsonWriter(buffer, _writerOptions);
                 w.WriteStartObject();
                 w.WriteNumber(SplunkJson.Time, timestamp.ToUnixTimeMilliseconds() / 1000.0);
                 if (o.Host is not null) w.WriteString(SplunkJson.Host, o.Host);
@@ -189,11 +214,10 @@ public sealed class SplunkLoggerProvider : ILoggerProvider, ISupportExternalScop
                 w.WriteEndObject();
 
                 w.WriteEndObject();
-            }
-            Enqueue(stream.ToArray());
         }
         catch (Exception ex)
         {
+            buffer.Discard();
             ReportError(ex);
         }
     }
