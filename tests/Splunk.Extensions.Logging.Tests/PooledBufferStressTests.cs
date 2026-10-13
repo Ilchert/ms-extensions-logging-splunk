@@ -185,6 +185,31 @@ public class PooledBufferStressTests(ITestOutputHelper output)
     }
 
     [Fact(Explicit = true)]
+    public void Serialization_errors_return_their_buffers()
+    {
+        var pool = new TrackingArrayPool();
+        var errors = 0;
+        var provider = Build(new SplunkLoggerOptions
+        {
+            ArrayPool = pool,
+            SerializeComplexValues = true,
+            OnError = _ => Interlocked.Increment(ref errors),
+        }, new SinkHandler());
+
+        var logger = provider.CreateLogger("Cat");
+        for (var i = 0; i < 100; i++) logger.LogInformation("{Big} {Bad}", new string('x', 5_000), new Throwing());
+        provider.Dispose();
+
+        Assert.Equal(100, errors);
+        Assert.Equal(0, pool.Outstanding);
+        Assert.Equal(0, pool.BadReturns);
+    }
+
+    private sealed class Throwing
+    {
+        public int Value => throw new InvalidOperationException("boom");
+    }
+    [Fact(Explicit = true)]
     public async Task Dispose_while_producers_are_running_does_not_leak_or_throw()
     {
         var pool = new TrackingArrayPool();
