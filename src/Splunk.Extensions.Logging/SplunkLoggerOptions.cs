@@ -38,8 +38,8 @@ public class SplunkLoggerOptions
     };
 
     /// <summary>
-    /// Serialize property and scope values that are not strings, booleans or numbers (collections, dictionaries, custom types, ...)
-    /// as JSON using <see cref="JsonSerializerOptions"/>. When false they are written as their <c>ToString()</c> text.
+    /// Serialize all property and scope values (including primitives, enums, collections and custom types)
+    /// as JSON using <see cref="JsonSerializerOptions"/>. When false only strings, booleans and finite numbers keep their JSON type; everything else is written as its <c>ToString()</c> text. A value that fails to serialize drops the event and calls <see cref="OnError"/>.
     /// </summary>
     public bool SerializeComplexValues { get; set; }
 

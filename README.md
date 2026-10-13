@@ -103,7 +103,7 @@ Events follow the layout produced by the [splunk-otel-collector](https://github.
 
 Strings, booleans and finite numbers keep their JSON types. Everything else (including `NaN`/`Infinity`, `Guid`, dates, collections and custom types) is written as its invariant `ToString()` text by default.
 
-Set `SerializeComplexValues = true` to serialize non-primitive values (collections, dictionaries, custom types, ...) as JSON with `SplunkLoggerOptions.JsonSerializerOptions`. By default these options allow named floating point literals (`"NaN"`, `"Infinity"`). The options' `Encoder` (default `UnsafeRelaxedJsonEscaping`) and writer settings (`WriteIndented`, `IndentCharacter`, `IndentSize`, `NewLine`, `MaxDepth`) are also used for the event itself. Reflection-based serialization is not trim/AOT-safe; supply a source-generated `TypeInfoResolver` in the options for such apps.
+Set `SerializeComplexValues = true` to serialize every property and scope value (primitives, enums, `Guid`, collections, dictionaries, custom types, ...) as JSON with `SplunkLoggerOptions.JsonSerializerOptions`. By default these options allow named floating point literals (`"NaN"`, `"Infinity"`). The options' `Encoder` (default `UnsafeRelaxedJsonEscaping`) and writer settings (`WriteIndented`, `IndentCharacter`, `IndentSize`, `NewLine`, `MaxDepth`) are also used for the event itself. If serializing an event fails, the event is dropped and `OnError` is called. Reflection-based serialization is not trim/AOT-safe; supply a source-generated `TypeInfoResolver` in the options for such apps.
 
 ## Integration tests
 

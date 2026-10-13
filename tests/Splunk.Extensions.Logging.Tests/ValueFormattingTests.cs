@@ -24,6 +24,11 @@ public class ValueFormattingTests
 
     private sealed record Point(int X, int Y);
 
+    private sealed class Throwing
+    {
+        public int Value => throw new InvalidOperationException("boom");
+    }
+
     private enum Color { Red = 1, Green = 2 }
 
     private static SplunkLoggerOptions CreateOptions(CaptureHandler handler, Action<SplunkLoggerOptions>? configure)
@@ -164,6 +169,42 @@ public class ValueFormattingTests
         using var doc = JsonDocument.Parse(handler.Body);
         Assert.Equal(["x", "y"], doc.RootElement.GetProperty("fields").GetProperty("Tags").EnumerateArray().Select(e => e.GetString()));
     }
+    [Fact]
+    public void All_values_use_the_serializer_when_enabled()
+    {
+        var f = LogAndGetFields(l => l.LogInformation("{Nan} {Day} {Nothing} {Text} {Number}",
+            double.NaN, DayOfWeek.Tuesday, null, "x", 5),
+            o => o.SerializeComplexValues = true);
+
+        Assert.Equal("NaN", f.GetProperty("Nan").GetString());
+        Assert.Equal(2, f.GetProperty("Day").GetInt32());
+        Assert.Equal(JsonValueKind.Null, f.GetProperty("Nothing").ValueKind);
+        Assert.Equal("x", f.GetProperty("Text").GetString());
+        Assert.Equal(5, f.GetProperty("Number").GetInt32());
+    }
+
+    [Fact]
+    public void Serialization_errors_are_reported_and_the_event_is_dropped()
+    {
+        var handler = new CaptureHandler();
+        Exception? error = null;
+        var options = CreateOptions(handler, o =>
+        {
+            o.SerializeComplexValues = true;
+            o.OnError = ex => error = ex;
+        });
+        var provider = new SplunkLoggerProvider(Options.Create(options));
+        var logger = provider.CreateLogger("Cat");
+
+        logger.LogInformation("{Bad}", new Throwing());
+        logger.LogInformation("good");
+        provider.Dispose();
+
+        Assert.NotNull(error);
+        using var doc = JsonDocument.Parse(handler.Body);
+        Assert.Equal("good", doc.RootElement.GetProperty("event").GetString());
+    }
+
     [Fact]
     public void Special_characters_are_not_over_escaped()
     {
