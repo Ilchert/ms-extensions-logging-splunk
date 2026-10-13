@@ -8,6 +8,9 @@ internal sealed class SplunkLoggerOptionsPostConfigure : IPostConfigureOptions<S
 {
     public void PostConfigure(string? name, SplunkLoggerOptions options)
     {
+        if (options.SerializeComplexValues)
+            options.JsonSerializerOptions?.MakeReadOnly(populateMissingResolver: true);
+
         var endpoint = options.Endpoint;
         if (endpoint is not null && !endpoint.AbsolutePath.Contains("/services/collector", StringComparison.OrdinalIgnoreCase))
             options.Endpoint = new Uri(endpoint.AbsoluteUri.TrimEnd('/') + "/services/collector/event");
