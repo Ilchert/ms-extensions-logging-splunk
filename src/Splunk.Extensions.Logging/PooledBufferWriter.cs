@@ -3,19 +3,25 @@ using System.Buffers;
 namespace Splunk.Extensions.Logging;
 
 /// <summary>
-/// <see cref="IBufferWriter{T}"/> backed by <see cref="ArrayPool{T}"/>. Disposing hands the written data to the
-/// provider's queue as a <see cref="ReadOnlySequence{T}"/>; the provider returns the arrays to the pool once it is sent.
+/// <see cref="IBufferWriter{T}"/> backed by rented <see cref="ArrayPool{T}"/> arrays. The written data can be copied to a stream;
+/// <see cref="Dispose"/> returns the arrays to the pool.
 /// </summary>
-internal sealed class PooledBufferWriter(SplunkLoggerProvider provider, ArrayPool<byte> pool) : IBufferWriter<byte>, IDisposable
+internal sealed class PooledBufferWriter(ArrayPool<byte> pool) : IBufferWriter<byte>, IDisposable
 {
     private const int SegmentSize = 2048;
 
-    private BufferSegment? _first;
-    private BufferSegment? _last;
+    private readonly List<ArraySegment<byte>> _segments = [];
     private byte[]? _current;
     private int _written;
 
-    public void Advance(int count) => _written += count;
+    /// <summary>Number of bytes written so far.</summary>
+    public long Length { get; private set; }
+
+    public void Advance(int count)
+    {
+        _written += count;
+        Length += count;
+    }
 
     public Memory<byte> GetMemory(int sizeHint = 0)
     {
@@ -25,20 +31,37 @@ internal sealed class PooledBufferWriter(SplunkLoggerProvider provider, ArrayPoo
 
     public Span<byte> GetSpan(int sizeHint = 0) => GetMemory(sizeHint).Span;
 
-    public void Dispose()
+    /// <summary>Finishes writing. Must be called before <see cref="CopyTo"/> or <see cref="CopyToAsync"/>.</summary>
+    public void Complete()
     {
-        Seal();
-        if (_first is null || _last is null) return;
-        provider.Enqueue(new ReadOnlySequence<byte>(_first, 0, _last, _last.Memory.Length));
+        if (_current is null) return;
+        AddSegment(_current, _written);
+        _current = null;
+        _written = 0;
     }
 
-    /// <summary>Returns everything written so far to the pool without enqueueing it.</summary>
-    public void Discard()
+    public void CopyTo(Stream stream)
     {
-        Seal();
-        if (_first is null || _last is null) return;
-        provider.Return(new ReadOnlySequence<byte>(_first, 0, _last, _last.Memory.Length));
-        _first = _last = null;
+        foreach (var s in _segments)
+            stream.Write(s);
+    }
+
+    public async Task CopyToAsync(Stream stream, CancellationToken cancellationToken = default)
+    {
+        foreach (var s in _segments)
+            await stream.WriteAsync(s, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Returns all rented arrays to the pool. Safe to call more than once.</summary>
+    public void Dispose()
+    {
+        if (_current is not null) pool.Return(_current);
+        _current = null;
+        _written = 0;
+        foreach (var s in _segments)
+            pool.Return(s.Array!);
+        _segments.Clear();
+        Length = 0;
     }
 
     private void Ensure(int sizeHint)
@@ -46,36 +69,14 @@ internal sealed class PooledBufferWriter(SplunkLoggerProvider provider, ArrayPoo
         var needed = Math.Max(sizeHint, 1);
         if (_current is not null && _current.Length - _written >= needed) return;
 
-        Seal();
+        if (_current is not null) AddSegment(_current, _written);
+        _written = 0;
         _current = pool.Rent(Math.Max(needed, SegmentSize));
     }
 
-    private void Seal()
+    private void AddSegment(byte[] array, int length)
     {
-        if (_current is null) return;
-        if (_written > 0)
-        {
-            var segment = new BufferSegment(_current.AsMemory(0, _written));
-            if (_last is null) _first = segment;
-            else _last.Append(segment);
-            _last = segment;
-        }
-        else
-        {
-            pool.Return(_current);
-        }
-        _current = null;
-        _written = 0;
-    }
-
-    private sealed class BufferSegment : ReadOnlySequenceSegment<byte>
-    {
-        public BufferSegment(ReadOnlyMemory<byte> memory) => Memory = memory;
-
-        public void Append(BufferSegment next)
-        {
-            next.RunningIndex = RunningIndex + Memory.Length;
-            Next = next;
-        }
+        if (length > 0) _segments.Add(new ArraySegment<byte>(array, 0, length));
+        else pool.Return(array);
     }
 }

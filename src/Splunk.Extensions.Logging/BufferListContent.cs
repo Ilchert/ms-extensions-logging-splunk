@@ -1,16 +1,15 @@
-using System.Buffers;
 using System.Net;
 using System.Net.Http.Headers;
 
 namespace Splunk.Extensions.Logging;
 
-/// <summary>HTTP content that streams a list of sequences without concatenating them.</summary>
+/// <summary>HTTP content that streams a list of pooled buffers without concatenating them.</summary>
 internal sealed class BufferListContent : HttpContent
 {
-    private readonly List<ReadOnlySequence<byte>> _entries;
+    private readonly List<PooledBufferWriter> _entries;
     private readonly long _length;
 
-    public BufferListContent(List<ReadOnlySequence<byte>> entries)
+    public BufferListContent(List<PooledBufferWriter> entries)
     {
         _entries = entries;
         foreach (var e in entries) _length += e.Length;
@@ -23,15 +22,13 @@ internal sealed class BufferListContent : HttpContent
     protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
     {
         foreach (var e in _entries)
-            foreach (var m in e)
-                await stream.WriteAsync(m, cancellationToken).ConfigureAwait(false);
+            await e.CopyToAsync(stream, cancellationToken).ConfigureAwait(false);
     }
 
     protected override void SerializeToStream(Stream stream, TransportContext? context, CancellationToken cancellationToken)
     {
         foreach (var e in _entries)
-            foreach (var m in e)
-                stream.Write(m.Span);
+            e.CopyTo(stream);
     }
 
     protected override bool TryComputeLength(out long length)
