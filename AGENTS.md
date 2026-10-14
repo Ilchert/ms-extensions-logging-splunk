@@ -17,6 +17,7 @@ Guidance for AI coding agents working in this repository.
   - `SplunkLoggingBuilderExtensions` – `AddSplunk` overloads
 - `tests/Splunk.Extensions.Logging.Tests/` – xunit v3 unit tests
 - `tests/Splunk.Extensions.Logging.IntegrationTests/` – sends the same logs via this provider and via OTel -> splunk-otel-collector, queries Splunk and asserts the indexed fields match (except an allow-list of intentional differences); skipped if Splunk is not running
+- `benchmarks/Splunk.Extensions.Logging.Benchmarks/` – BenchmarkDotNet; set `SPLUNK_BASELINE_DLL` to a Release build of another checkout (e.g. a `git worktree` of `main`) to compare against it: `dotnet run -c Release --project benchmarks/Splunk.Extensions.Logging.Benchmarks -- --filter "*"`
 - `tests/integration/` – `docker-compose.yml` (Splunk + splunk-otel-collector) and `otel-collector.yaml`
 
 ## Build & test
@@ -28,11 +29,13 @@ dotnet test
 
 Keep the build at 0 warnings and all tests passing.
 
+Stress/performance tests (`PooledBufferStressTests`) and integration tests are explicit (`[Fact(Explicit = true)]`): plain `dotnet test` skips them. Run the stress tests with `dotnet run --project tests/Splunk.Extensions.Logging.Tests -- -explicit only`.
+
 Integration tests need Docker (Splunk takes ~1-2 minutes to become healthy):
 
 ```powershell
 docker compose -f tests/integration/docker-compose.yml up -d
-dotnet test tests/Splunk.Extensions.Logging.IntegrationTests
+dotnet run --project tests/Splunk.Extensions.Logging.IntegrationTests -- -explicit only
 docker compose -f tests/integration/docker-compose.yml down
 ```
 

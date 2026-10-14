@@ -107,11 +107,11 @@ Set `SerializeComplexValues = true` to serialize every property and scope value 
 
 ## Integration tests
 
-`tests/Splunk.Extensions.Logging.IntegrationTests` sends the same log calls through this provider (directly to HEC) and through the OpenTelemetry .NET logger (OTLP -> splunk-otel-collector -> HEC), then queries Splunk and compares the indexed events. They are skipped when Splunk is not running.
+`tests/Splunk.Extensions.Logging.IntegrationTests` sends the same log calls through this provider (directly to HEC) and through the OpenTelemetry .NET logger (OTLP -> splunk-otel-collector -> HEC), then queries Splunk and compares the indexed events. The test is explicit, so it only runs when requested with `-explicit only`; it is skipped if Splunk is not running.
 
 ```bash
 docker compose -f tests/integration/docker-compose.yml up -d   # Splunk takes ~1-2 minutes to become healthy
-dotnet test tests/Splunk.Extensions.Logging.IntegrationTests
+dotnet run --project tests/Splunk.Extensions.Logging.IntegrationTests -- -explicit only
 docker compose -f tests/integration/docker-compose.yml down
 ```
 

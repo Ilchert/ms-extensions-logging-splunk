@@ -14,6 +14,8 @@ internal sealed class SplunkLoggerOptionsValidator : IValidateOptions<SplunkLogg
             (failures ??= []).Add("SplunkLoggerOptions.Token is required.");
         if (options.JsonSerializerOptions is null)
             (failures ??= []).Add("SplunkLoggerOptions.JsonSerializerOptions is required.");
+        if (options.ArrayPool is null)
+            (failures ??= []).Add("SplunkLoggerOptions.ArrayPool is required.");
         if (options.BatchSize < 1)
             (failures ??= []).Add("SplunkLoggerOptions.BatchSize must be at least 1.");
         if (options.QueueCapacity < 1)
